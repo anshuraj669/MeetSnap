@@ -1,0 +1,24 @@
+# Secrets and per-developer config: never commit
+# SDK path + appcheck.debugToken
+local.properties
+# Firebase config: download your own from the Firebase console
+app/google-services.json
+# Signing keys
+*.jks
+*.keystore
+keystore.properties
+
+# Build output
+.gradle/
+.kotlin/
+build/
+app/build/
+app/release/
+captures/
+.cxx/
+*.apk
+*.aab
+
+# IDE
+*.iml
+.idea/
