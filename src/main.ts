@@ -15,6 +15,7 @@ import {
   authErrorMessage,
 } from './firebase';
 import { viewDashboard, mailtoFor, statusBadge, scoreBadge, sourceBadge, type Filter } from './dashboard';
+import { viewPipeline, viewLeadsTable, stagePicker, timeline, leadsCsv, applyFilters, sortLeadsBy, stageOf, type Stage, type SortKey, type CrmInput } from './crm';
 import { icon } from './icons';
 import {
   readCard,
@@ -49,7 +50,7 @@ import {
 import { startCamera, stopCamera, captureFrame, fileToJpeg, thumbnail, cameraActive } from './camera';
 import { dictationSupported, dictation, startDictation, stopDictation } from './dictation';
 
-type Tab = 'capture' | 'leads' | 'team';
+type Tab = 'capture' | 'pipeline' | 'leads' | 'dashboard' | 'team';
 
 interface State {
   user: User | null;
@@ -86,6 +87,9 @@ interface State {
   /** The user chose "Continue as a guest" (a leftover anonymous session without a team otherwise shows sign-in). */
   guestChosen: boolean;
   menuOpen: boolean;
+  owner: string; // CRM filter: 'all' | 'me' | uid
+  sort: SortKey;
+  dir: 1 | -1;
   obMode: 'create' | 'join';
 }
 
@@ -99,7 +103,7 @@ const s: State = {
   online: navigator.onLine,
   nano: 'checking',
   nanoProgress: null,
-  tab: 'capture',
+  tab: 'pipeline',
   leadId: null,
   contact: emptyContact(),
   cardThumb: '',
@@ -120,6 +124,9 @@ const s: State = {
   search: '',
   guestChosen: false,
   menuOpen: false,
+  owner: 'all',
+  sort: 'created',
+  dir: -1,
   obMode: 'create',
 };
 
@@ -328,6 +335,21 @@ function processPending() {
   s.leads.filter((l) => l.ownerUid === uid() && l.cloudStatus === 'pending').forEach((l) => processCloud(l));
 }
 
+/** Moves a lead between CRM stages. Stages are derived from status/followedUpAt/email (see crm.ts). */
+function moveStage(l: Lead, to: Stage) {
+  const from = stageOf(l);
+  if (from === to || to === 'new') return;
+  if (to === 'ready') {
+    if (!l.email) return toast('The follow-up email is still being written.');
+    updateLead(teamId(), l.id, { status: 'new', followedUpAt: null });
+  } else if (to === 'contacted') {
+    updateLead(teamId(), l.id, { status: 'followed_up', followedUpAt: l.followedUpAt ?? Date.now() });
+  } else {
+    updateLead(teamId(), l.id, { status: to });
+  }
+  toast(`${l.contact.name || l.contact.company} moved to ${to === 'ready' ? 'Ready to send' : to[0].toUpperCase() + to.slice(1)}.`);
+}
+
 function markFollowedUp(l: Lead) {
   if (l.followedUpAt) return;
   updateLead(teamId(), l.id, { status: l.status === 'new' ? 'followed_up' : l.status, followedUpAt: Date.now() });
@@ -388,7 +410,7 @@ async function signOutNow() {
   unwatchTeam = unwatchLeads = null;
   seenLeads.clear();
   resetCapture();
-  Object.assign(s, { tab: 'capture', leadId: null, filter: 'all', search: '', authMode: 'signin', authOpen: false, verifyHidden: false, guestChosen: false, menuOpen: false, logOpen: false });
+  Object.assign(s, { tab: 'pipeline', owner: 'all', leadId: null, filter: 'all', search: '', authMode: 'signin', authOpen: false, verifyHidden: false, guestChosen: false, menuOpen: false, logOpen: false });
   await logout();
 }
 
@@ -511,7 +533,9 @@ function accountMenu() {
 
 const TITLES: Record<Tab, [string, string]> = {
   capture: ['Capture a lead', 'Scan the card, record the conversation, save. Ready for the next visitor in seconds.'],
-  leads: ['Leads', 'Your team’s pipeline, live.'],
+  pipeline: ['Pipeline', 'Every lead by stage. Drag a card to move it.'],
+  leads: ['Leads', 'Search, sort, filter and export your team’s leads.'],
+  dashboard: ['Dashboard', 'How the team is doing, live.'],
   team: ['Team & settings', 'What you sell, the current event, and who is on your team.'],
 };
 
@@ -522,9 +546,9 @@ function todoCount() {
 function shell(body: string) {
   const ai = aiStatus();
   const todo = todoCount();
-  const [title, sub] = s.leadId ? ['Lead', 'Contact, qualification and follow-up email'] : TITLES[s.tab];
+  const [title, sub] = TITLES[s.tab];
   const nav = (id: Tab, ic: string, label: string, count = 0) =>
-    `<button class="nav-item ${s.tab === id && !s.leadId ? 'on' : ''}" data-a="tab" data-v="${id}">${icon(ic, 18)}<span>${label}</span>${count ? `<span class="nav-count">${count}</span>` : ''}</button>`;
+    `<button class="nav-item ${s.tab === id ? 'on' : ''}" data-a="tab" data-v="${id}">${icon(ic, 18)}<span>${label}</span>${count ? `<span class="nav-count">${count}</span>` : ''}</button>`;
   const bnav = (id: Tab, ic: string, label: string, count = 0) =>
     `<button class="${s.tab === id ? 'on' : ''}" data-a="tab" data-v="${id}">${icon(ic, 20)}${label}${count ? `<span class="nav-count">${count}</span>` : ''}</button>`;
   return `
@@ -533,8 +557,12 @@ function shell(body: string) {
       <div class="brand"><img src="/favicon.svg" alt=""/>MeetSnap</div>
       ${s.team ? `<div class="workspace"><b>${esc(s.team.name)}</b><span>${esc(s.team.event || 'No event set')}</span></div>` : ''}
       <nav class="nav">
-        ${nav('capture', 'scan', 'Capture')}
-        ${nav('leads', 'chart', 'Leads', todo)}
+        <span class="nav-label">Sell</span>
+        ${nav('capture', 'scan', 'Capture lead')}
+        ${nav('pipeline', 'columns', 'Pipeline', todo)}
+        ${nav('leads', 'list', 'Leads')}
+        <span class="nav-label">Manage</span>
+        ${nav('dashboard', 'chart', 'Dashboard')}
         ${nav('team', 'users', 'Team & settings')}
       </nav>
       <div class="side-foot">
@@ -562,7 +590,7 @@ function shell(body: string) {
         ${body}
       </main>
     </div>
-    <nav class="bottom-nav">${bnav('capture', 'scan', 'Capture')}${bnav('leads', 'chart', 'Leads', todo)}${bnav('team', 'users', 'Team')}</nav>
+    <nav class="bottom-nav">${bnav('capture', 'scan', 'Capture')}${bnav('pipeline', 'columns', 'Pipeline', todo)}${bnav('leads', 'list', 'Leads')}${bnav('dashboard', 'chart', 'Stats')}${bnav('team', 'users', 'Team')}</nav>
   </div>`;
 }
 
@@ -738,7 +766,16 @@ function viewCapture() {
   </section>`;
 }
 
-function viewLeads() {
+function crmInput(): CrmInput {
+  return { leads: s.leads, myUid: uid(), online: s.online, temp: s.filter, search: s.search, owner: s.owner, sort: s.sort, dir: s.dir, dragging: false };
+}
+const viewPipelineTab = () => (s.leads.length ? viewPipeline(crmInput()) : emptyLeads());
+const viewLeadsTab = () => (s.leads.length ? viewLeadsTable(crmInput()) : emptyLeads());
+function emptyLeads() {
+  return viewDashboard({ leads: [], myUid: uid(), myName: '', event: '', filter: 'all', search: '', online: s.online });
+}
+
+function viewDashboardTab() {
   return viewDashboard({
     leads: s.leads,
     myUid: uid(),
@@ -752,7 +789,7 @@ function viewLeads() {
 
 const webUrl = (w: string) => (/^https?:\/\//i.test(w) ? w : `https://${w}`);
 
-function viewLead(l: Lead) {
+function viewLeadPanel(l: Lead) {
   const c = l.contact;
   const mail = mailtoFor(l);
   const name = c.name || c.company || 'Unknown';
@@ -763,78 +800,63 @@ function viewLead(l: Lead) {
     ['Decision role', l.note.authority],
     ['Next step', l.note.nextStep],
     ['Interested in', l.note.products.join(', ')],
-    ['Captured by', `${l.ownerName} · ${new Date(l.createdAt).toLocaleString()}${l.event ? ` · ${l.event}` : ''}`],
+    ['Owner', l.ownerName],
+    ['Event', l.event],
   ];
-  return `
-  <button class="back" data-a="back">${icon('chevronLeft', 16)} All leads</button>
-  <div class="grid grid-cols-2" style="align-items:start">
-    <div class="grid">
-      <div class="card">
-        <div class="card-body">
-          <div class="person">
-            ${l.cardThumb ? `<img class="person-thumb" src="${l.cardThumb}" alt="Business card"/>` : `<span class="person-initials">${esc(initials(name))}</span>`}
-            <div style="min-width:0"><h2>${esc(name)}</h2><p class="muted">${esc([c.title, c.company].filter(Boolean).join(' · ') || 'No title or company')}</p></div>
-          </div>
-          <div class="row wrap mt">${scoreBadge(l.score)}${statusBadge(l, s.online, uid())}${badge(l.sources.note)}</div>
-          <div class="reason">${icon('info', 16)}<div>${esc(l.scoreReason)}</div></div>
-          <div class="contact-actions">
-            ${c.email ? `<a class="btn btn-sm" href="mailto:${esc(c.email)}">${icon('mail', 14)} ${esc(c.email)}</a>` : ''}
-            ${c.phone ? `<a class="btn btn-sm" href="tel:${esc(c.phone)}">${icon('phone', 14)} ${esc(c.phone)}</a>` : ''}
-            ${c.website ? `<a class="btn btn-sm" href="${esc(webUrl(c.website))}" target="_blank" rel="noopener">${icon('globe', 14)} ${esc(c.website)}</a>` : ''}
-          </div>
-        </div>
-        <div class="card-head" style="border-top:1px solid var(--border)"><h3>Qualification</h3></div>
-        <div class="card-body">
-          <dl class="dl">${facts.filter(([, v]) => v.trim()).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
-          ${l.note.transcript ? `<details class="mt"><summary class="link small">Show the original note</summary><p class="muted small mt">${esc(l.note.transcript)}</p></details>` : ''}
-        </div>
-        <div class="card-foot row">
-          <span class="muted small" style="margin-right:auto">Outcome</span>
-          <button class="btn btn-sm" data-a="won" data-id="${l.id}" ${l.status === 'won' ? 'disabled' : ''}>${icon('trophy', 14)} Won</button>
-          <button class="btn btn-sm" data-a="lost" data-id="${l.id}" ${l.status === 'lost' ? 'disabled' : ''}>Lost</button>
-        </div>
+  const email = l.email
+    ? `<label class="field"><span class="field-label">Subject</span><input id="em-subject" data-lead="${l.id}" value="${esc(l.email.subject)}"/></label>
+       <label class="field"><span class="field-label">Message</span><textarea id="em-body" data-lead="${l.id}" rows="11">${esc(tidyEmail(l.email.body))}</textarea></label>
+       <div class="email-actions mt">
+         ${mail ? `<a class="btn btn-primary" href="${mail}" data-a="sent" data-id="${l.id}">${icon('send', 16)} Open in email</a>` : '<span class="muted small" style="align-self:center">No email address. Copy the text instead.</span>'}
+         <button class="btn" data-a="copy" data-id="${l.id}">${icon('copy', 16)} Copy</button>
+         <button class="btn" data-a="regen" data-id="${l.id}" ${s.online ? '' : 'disabled'}>${icon('refresh', 16)} Rewrite</button>
+         ${l.followedUpAt ? '' : `<button class="btn btn-ghost" data-a="mark-sent" data-id="${l.id}">Mark as sent</button>`}
+       </div>
+       ${l.followedUpAt ? `<p class="followed mt">${icon('checkCircle', 16)} Followed up ${Math.max(0, Math.round((l.followedUpAt - l.createdAt) / 60000))} min after the meeting</p>` : ''}`
+    : l.cloudStatus === 'error'
+      ? `<div class="alert error">${icon('alert', 16)}<div>The email couldn't be written because the cloud model was busy.</div></div><button class="btn btn-primary mt" data-a="retry" data-id="${l.id}" ${s.online ? '' : 'disabled'}>${icon('refresh', 16)} Try again</button>`
+      : l.ownerUid !== uid()
+        ? `<div class="pending"><span class="spinner"></span>${esc(l.ownerName)}'s device is writing this follow-up.</div>`
+        : s.online
+          ? '<div class="pending"><span class="spinner"></span>Researching the company and writing the email…</div>'
+          : `<div class="pending">${icon('wifiOff', 18)}Saved offline. The email is written as soon as you reconnect.</div>`;
+  return `<div class="panel-scrim" data-a="close-panel"></div>
+  <aside class="panel" role="dialog" aria-modal="true" aria-label="Lead: ${esc(name)}">
+    <div class="panel-head">
+      ${l.cardThumb ? `<img class="person-thumb" src="${l.cardThumb}" alt="Business card"/>` : `<span class="person-initials">${esc(initials(name))}</span>`}
+      <div style="min-width:0;flex:1"><h2>${esc(name)}</h2><p class="muted">${esc([c.title, c.company].filter(Boolean).join(' · ') || 'No title or company')}</p></div>
+      <button class="btn btn-ghost icon-btn" data-a="close-panel" aria-label="Close">${icon('x', 18)}</button>
+    </div>
+    <div class="panel-stage">${stagePicker(l)}</div>
+    <div class="panel-body">
+      <div class="row wrap">${scoreBadge(l.score)}${statusBadge(l, s.online, uid())}${sourceBadge(l.sources.note)}</div>
+      <div class="reason">${icon('info', 16)}<div>${esc(l.scoreReason)}</div></div>
+      <div class="contact-actions">
+        ${c.email ? `<a class="btn btn-sm" href="mailto:${esc(c.email)}">${icon('mail', 14)} ${esc(c.email)}</a>` : ''}
+        ${c.phone ? `<a class="btn btn-sm" href="tel:${esc(c.phone)}">${icon('phone', 14)} ${esc(c.phone)}</a>` : ''}
+        ${c.website ? `<a class="btn btn-sm" href="${esc(webUrl(c.website))}" target="_blank" rel="noopener">${icon('globe', 14)} ${esc(c.website)}</a>` : ''}
       </div>
+
+      <section class="psec"><div class="psec-head"><h3>${icon('mail', 16)} Follow-up email</h3>${sourceBadge(l.sources.email)}</div>${email}</section>
+
+      <section class="psec"><div class="psec-head"><h3>${icon('flame', 16)} Qualification</h3></div>
+        <dl class="dl">${facts.filter(([, v]) => v.trim()).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+        ${l.note.transcript ? `<details class="mt"><summary class="link small">Show the original note</summary><p class="muted small mt">${esc(l.note.transcript)}</p></details>` : ''}
+      </section>
+
       ${
         l.research
-          ? `<div class="card research">
-              <div class="card-head"><h3>${icon('building', 16)} ${esc(c.company || 'Company')}</h3>${badge(l.sources.research)}</div>
-              <div class="card-body">
-                <p>${esc(l.research.about)}</p>
-                <p class="muted small">${esc([l.research.industry, l.research.sizeGuess].filter(Boolean).join(' · '))}</p>
-                ${l.research.talkingPoints.length ? `<ul>${l.research.talkingPoints.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
-                <p class="disclaimer">${icon('info', 13)} AI summary from model knowledge. Verify before relying on it.</p>
-              </div>
-            </div>`
+          ? `<section class="psec research"><div class="psec-head"><h3>${icon('building', 16)} ${esc(c.company || 'Company')}</h3>${sourceBadge(l.sources.research)}</div>
+              <p>${esc(l.research.about)}</p>
+              <p class="muted small">${esc([l.research.industry, l.research.sizeGuess].filter(Boolean).join(' · '))}</p>
+              ${l.research.talkingPoints.length ? `<ul>${l.research.talkingPoints.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+              <p class="disclaimer">${icon('info', 13)} AI summary from model knowledge. Verify before relying on it.</p></section>`
           : ''
       }
+
+      <section class="psec"><div class="psec-head"><h3>${icon('clock', 16)} Activity</h3></div>${timeline(l)}</section>
     </div>
-    <div class="card email-box">
-      <div class="card-head"><h3>${icon('mail', 16)} Follow-up email</h3>${badge(l.sources.email)}</div>
-      ${
-        l.email
-          ? `<div class="card-body">
-               <label class="field"><span class="field-label">Subject</span><input id="em-subject" value="${esc(l.email.subject)}"/></label>
-               <label class="field"><span class="field-label">Message</span><textarea id="em-body" rows="12">${esc(tidyEmail(l.email.body))}</textarea></label>
-               ${l.followedUpAt ? `<p class="followed mt">${icon('checkCircle', 16)} Followed up ${Math.max(0, Math.round((l.followedUpAt - l.createdAt) / 60000))} min after the meeting</p>` : ''}
-             </div>
-             <div class="card-foot email-actions">
-               ${mail ? `<a class="btn btn-primary" href="${mail}" data-a="sent" data-id="${l.id}">${icon('send', 16)} Open in email</a>` : '<span class="muted small" style="align-self:center">No email address on this lead. Copy the text instead.</span>'}
-               <button class="btn" data-a="copy" data-id="${l.id}">${icon('copy', 16)} Copy</button>
-               <button class="btn" data-a="regen" data-id="${l.id}" ${s.online ? '' : 'disabled'}>${icon('refresh', 16)} Rewrite</button>
-               ${l.followedUpAt ? '' : `<button class="btn btn-ghost" data-a="mark-sent" data-id="${l.id}">Mark as sent</button>`}
-             </div>`
-          : `<div class="card-body">${
-              l.cloudStatus === 'error'
-                ? `<div class="alert error">${icon('alert', 16)}<div>The email couldn't be written because the cloud model was busy.</div></div><button class="btn btn-primary mt" data-a="retry" data-id="${l.id}" ${s.online ? '' : 'disabled'}>${icon('refresh', 16)} Try again</button>`
-                : l.ownerUid !== uid()
-                  ? `<div class="pending"><span class="spinner"></span>${esc(l.ownerName)}'s device is writing this follow-up.</div>`
-                  : s.online
-                    ? '<div class="pending"><span class="spinner"></span>Researching the company and writing the email…</div>'
-                    : `<div class="pending">${icon('wifiOff', 18)}Saved offline. The email is written as soon as you reconnect.</div>`
-            }</div>`
-      }
-    </div>
-  </div>`;
+  </aside>`;
 }
 
 function viewTeam() {
@@ -929,7 +951,7 @@ function logDrawer() {
   </aside>`;
 }
 
-const KEEP_FIELDS = ['a-email', 'a-name', 'a-pw', 'ob-name', 'ob-code', 'j-code', 't-name', 't-company', 't-offering', 't-event', 'p-name']
+const KEEP_FIELDS = ['a-email', 'a-name', 'a-pw', 'ob-name', 'ob-code', 'j-code', 't-name', 't-company', 't-offering', 't-event', 'p-name', 'em-subject', 'em-body']
   .map((id) => `#${id}`)
   .join(',');
 
@@ -945,12 +967,9 @@ function render() {
   else if (onAuthScreen()) page = viewAuth();
   else if (!s.profile) page = viewOnboarding();
   else {
-    let body: string;
-    if (s.leadId) {
-      const l = s.leads.find((x) => x.id === s.leadId);
-      body = l ? viewLead(l) : '<div class="card empty"><h2>Lead not found</h2><p>It may have been removed.</p><button class="btn" data-a="back">Back to leads</button></div>';
-    } else body = { capture: viewCapture, leads: viewLeads, team: viewTeam }[s.tab]();
-    page = shell(body);
+    const body = { capture: viewCapture, pipeline: viewPipelineTab, leads: viewLeadsTab, dashboard: viewDashboardTab, team: viewTeam }[s.tab]();
+    const open = s.leadId ? s.leads.find((x) => x.id === s.leadId) : undefined;
+    page = shell(body) + (open ? viewLeadPanel(open) : '');
   }
 
   // Keep focus and caret in text fields across re-renders (dictation and live updates re-render often).
@@ -960,17 +979,17 @@ function render() {
 
   // Form fields that aren't kept in state would be emptied by the re-render (for example when a
   // sign-in error appears, or a live Firestore update arrives while editing team settings): keep them.
-  const typed = new Map<string, string>();
-  root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(KEEP_FIELDS).forEach((el) => typed.set(el.id, el.value));
+  const typed = new Map<string, { value: string; lead?: string }>();
+  root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(KEEP_FIELDS).forEach((el) => typed.set(el.id, { value: el.value, lead: el.dataset.lead }));
 
   root.innerHTML = `
     ${page}
     ${s.busy && !onAuthScreen() ? `<div class="busy"><div class="busy-card"><span class="spinner"></span>${esc(s.busy)}</div></div>` : ''}
     ${s.toast ? `<div class="toast" role="status">${icon('checkCircle', 16)}${esc(s.toast)}</div>` : ''}
     ${logDrawer()}`;
-  typed.forEach((value, id) => {
+  typed.forEach((v, id) => {
     const el = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`);
-    if (el) el.value = value;
+    if (el && el.dataset.lead === v.lead) el.value = v.value; // email edits belong to one lead only
   });
   const slot = root.querySelector('#cam-slot');
   if (slot) slot.appendChild(video);
@@ -1074,9 +1093,29 @@ root.addEventListener('click', async (ev) => {
     case 'filter':
       return set({ filter: v as Filter });
     case 'open':
-      return go('leads', { leadId: id ?? null });
+      return set({ leadId: id ?? null, menuOpen: false });
     case 'back':
-      return go('leads');
+    case 'close-panel':
+      return set({ leadId: null });
+    case 'temp':
+      return set({ filter: v as Filter });
+    case 'sort': {
+      const key = v as SortKey;
+      return set(s.sort === key ? { dir: s.dir === 1 ? -1 : 1 } : { sort: key, dir: key === 'created' || key === 'speed' ? (key === 'created' ? -1 : 1) : 1 });
+    }
+    case 'export': {
+      const rows = sortLeadsBy(applyFilters(s.leads, crmInput()), s.sort, s.dir);
+      const url = URL.createObjectURL(new Blob(['\ufeff' + leadsCsv(rows)], { type: 'text/csv;charset=utf-8' }));
+      const a2 = Object.assign(document.createElement('a'), { href: url, download: `meetsnap-leads-${new Date().toLocaleDateString('en-CA')}.csv` });
+      a2.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return toast(`Exported ${rows.length} lead${rows.length === 1 ? '' : 's'} to CSV.`);
+    }
+    case 'stage': {
+      const l = leadById(id);
+      if (l) moveStage(l, v as Stage);
+      return;
+    }
     case 'sent': {
       const l = leadById(id);
       if (l) markFollowedUp(l); // the browser follows the mailto: link
@@ -1150,6 +1189,7 @@ root.addEventListener('input', (ev) => {
 
 root.addEventListener('change', async (ev) => {
   const t = ev.target as HTMLInputElement;
+  if (t.id === 'owner-filter') return set({ owner: t.value });
   if (t.dataset.a === 'upload' && t.files?.[0]) {
     const b64 = await fileToJpeg(t.files[0]);
     t.value = '';
@@ -1162,6 +1202,47 @@ root.addEventListener('change', async (ev) => {
   }
 });
 
+// Pipeline drag and drop. The DOM is not re-rendered during a drag (that would cancel it).
+let dragId: string | null = null;
+root.addEventListener('dragstart', (ev) => {
+  const card = (ev.target as HTMLElement).closest<HTMLElement>('[data-drag]');
+  if (!card) return;
+  dragId = card.dataset.drag!;
+  ev.dataTransfer?.setData('text/plain', dragId);
+  if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move';
+  card.classList.add('is-dragging');
+  root.querySelector('.board')?.classList.add('dragging');
+});
+root.addEventListener('dragover', (ev) => {
+  const col = (ev.target as HTMLElement).closest<HTMLElement>('[data-drop]');
+  if (!col || !dragId) return;
+  ev.preventDefault();
+  root.querySelectorAll('.col-stage.over').forEach((c) => c !== col && c.classList.remove('over'));
+  col.classList.add('over');
+});
+root.addEventListener('drop', (ev) => {
+  const col = (ev.target as HTMLElement).closest<HTMLElement>('[data-drop]');
+  ev.preventDefault();
+  const l = dragId ? leadById(dragId) : undefined;
+  dragId = null;
+  if (col && l) moveStage(l, col.dataset.drop as Stage);
+  render();
+});
+root.addEventListener('dragend', () => {
+  dragId = null;
+  root.querySelectorAll('.over, .is-dragging, .board.dragging').forEach((el) => el.classList.remove('over', 'is-dragging', 'dragging'));
+});
+
+// Keyboard: Escape closes panels; Enter opens a focused pipeline card.
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') {
+    if (s.logOpen) return set({ logOpen: false });
+    if (s.menuOpen) return set({ menuOpen: false });
+    if (s.leadId) return set({ leadId: null });
+  }
+  if (ev.key === 'Enter' && (ev.target as HTMLElement).matches?.('.lcard')) (ev.target as HTMLElement).click();
+});
+
 root.addEventListener('submit', (ev) => {
   ev.preventDefault();
   if ((ev.target as HTMLElement).dataset.a === 'auth-form') submitAuth();
@@ -1169,7 +1250,7 @@ root.addEventListener('submit', (ev) => {
 
 // Live timers on the dashboard ("waiting 12 min") tick every 30 s.
 setInterval(() => {
-  if (s.tab === 'leads' && !s.leadId && !s.busy && document.visibilityState === 'visible') render();
+  if (['pipeline', 'leads', 'dashboard'].includes(s.tab) && !s.leadId && !s.busy && document.visibilityState === 'visible') render();
 }, 30_000);
 
 window.addEventListener('online', () => {

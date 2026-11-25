@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- MeetSnap logo: a business card with a paper plane (captured → followed up). Drawn in a 64-unit box,
+     scaled into the 66dp safe zone of the 108dp adaptive-icon canvas. Same artwork as public/favicon.svg. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M30,38h48a5,5 0 0 1 5,5v24a5,5 0 0 1 -5,5h-48a5,5 0 0 1 -5,-5v-24a5,5 0 0 1 5,-5z" />
-    <path android:fillColor="#FF3B82F6" android:pathData="M33,46h18v4h-18zM33,54h24v3h-24zM33,61h16v3h-16z" />
-    <path android:fillColor="#FFF97316" android:pathData="M70,42l-9,14h6l-3,12l10,-16h-6z" />
+    <group android:translateX="20" android:translateY="17.25" android:scaleX="1" android:scaleY="1">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M13.5,13h26a4.5,4.5 0 0 1 4.5,4.5v16a4.5,4.5 0 0 1 -4.5,4.5h-26a4.5,4.5 0 0 1 -4.5,-4.5v-16a4.5,4.5 0 0 1 4.5,-4.5z"/>
+        <path android:fillColor="#FF2563EB" android:pathData="M14.3,23.5a3.7,3.7 0 1 0 7.4,0a3.7,3.7 0 1 0 -7.4,0z"/>
+        <path android:fillColor="#FF2563EB" android:pathData="M26.6,20.5h10.8a1.6,1.6 0 0 1 0,3.2h-10.8a1.6,1.6 0 0 1 0,-3.2z"/>
+        <path android:fillColor="#FF93C5FD" android:pathData="M26.6,26.8h5.8a1.6,1.6 0 0 1 0,3.2h-5.8a1.6,1.6 0 0 1 0,-3.2z"/>
+        <path android:fillColor="#FF2563EB" android:strokeColor="#FF2563EB" android:strokeWidth="5" android:strokeLineJoin="round" android:pathData="M57,28L27,40.5L41.5,45.5L45.5,58Z"/>
+        <path android:fillColor="#FFFFFFFF" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.2" android:strokeLineJoin="round" android:pathData="M57,28L27,40.5L41.5,45.5Z"/>
+        <path android:fillColor="#FFBFDBFE" android:strokeColor="#FFBFDBFE" android:strokeWidth="1.2" android:strokeLineJoin="round" android:pathData="M57,28L41.5,45.5L45.5,58Z"/>
+    </group>
 </vector>

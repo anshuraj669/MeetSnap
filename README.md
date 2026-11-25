@@ -1,3 +1,5 @@
+<p align="center"><img src="public/icon-192.png" width="96" alt="MeetSnap logo"/></p>
+
 # 📇 MeetSnap: from handshake to follow-up in a minute
 
 *By **Anshu Raj** · #BuildHybridAI 2026*
@@ -23,13 +25,17 @@ At trade shows and client visits, salespeople collect dozens of business cards a
 2. **🎙 Talk** for 20 seconds about the visitor's need, budget, timeline and the agreed next step. Speech is recognised on-device where the platform supports it; typing and quick chips work too.
 3. **✅ Save.** Gemini Nano qualifies the lead **on-device**: needs, budget, timeline, decision-maker, next step, and a **🔥 Hot / Warm / Cold** score with a one-line reason. The form clears right away for the next visitor.
 4. **☁️ In the background,** cloud Gemini researches the company and writes a **personal follow-up email** whose tone matches the score.
-5. **📊 Live sales dashboard** for the whole team:
+5. **🗂 Sales CRM for the team** (web):
+   - **Pipeline:** a Kanban board with stages *New → Ready to send → Contacted → Won / Lost*. Drag a card to move a lead.
+   - **Leads:** a sortable table with search, filters by rep and temperature, and **Export CSV**.
+   - **Lead panel:** a slide-in panel with a stage selector, the follow-up email, the qualification, company research and an **activity timeline**.
+6. **📊 Live sales dashboard** for the whole team:
    - KPI cards: leads today, hot leads, follow-up rate, **speed to follow-up**, deals won
    - **🔥 Act now:** leads with an email ready and a "waiting 12 min" timer, sent with one tap
    - Pipeline funnel, lead temperature, leads by hour, team leaderboard
    - Search and filters over all leads
-6. **📴 Offline-first:** leads are saved on the device. Cards and notes are read by Gemini Nano. Leads saved offline are scored, researched and emailed automatically when the signal returns.
-7. **👥 Teams and accounts:** email/password accounts (or **continue as guest**), with a team created automatically. Reps join with a 6-letter code, and their leads appear on the manager's dashboard in real time.
+7. **📴 Offline-first:** leads are saved on the device. Cards and notes are read by Gemini Nano. Leads saved offline are scored, researched and emailed automatically when the signal returns.
+8. **👥 Teams and accounts:** email/password accounts (or **continue as guest**), with a team created automatically. Reps join with a 6-letter code, and their leads appear on the manager's dashboard in real time.
 
 ## How Firebase AI Logic hybrid inference is used
 Every AI call goes through one hybrid model per task: `getGenerativeModel(ai, { mode, onDeviceParams, inCloudParams })` on the web ([`src/ai.ts`](src/ai.ts)) and `generativeModel(..., onDeviceConfig = OnDeviceConfig(mode))` on Android ([`ai/Ai.kt`](android/app/src/main/java/com/meetsnap/app/ai/Ai.kt)).
@@ -68,7 +74,8 @@ src/                 Web app (Vite + TypeScript, no framework)
   ai.ts              Hybrid models, prompts, JSON schemas, retry/fallback, AI log
   firebase.ts        App, App Check, Auth, Firestore (offline cache), Remote Config
   store.ts           Teams, join codes, leads (Firestore) + metrics
-  dashboard.ts       Sales dashboard (Leads tab)
+  crm.ts             Pipeline board, leads table, stages, timeline, CSV export
+  dashboard.ts       Sales dashboard (KPIs, Act now, charts, leaderboard)
   dictation.ts       Voice notes (on-device speech recognition in Chrome)
   camera.ts          Webcam capture / photo upload → downscaled JPEG
   main.ts            UI: auth → onboarding → Capture / Leads / Team

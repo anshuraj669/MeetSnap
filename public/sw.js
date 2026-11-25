@@ -1,7 +1,7 @@
 // Minimal offline app shell: the app keeps loading with no network.
-const CACHE = 'meetsnap-v1';
+const CACHE = 'meetsnap-v2';
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/index.html', '/favicon.svg', '/manifest.webmanifest'])));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/index.html', '/favicon.svg', '/icon-192.png', '/apple-touch-icon.png', '/manifest.webmanifest'])));
   self.skipWaiting();
 });
 self.addEventListener('activate', (e) => {

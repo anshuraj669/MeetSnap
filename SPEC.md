@@ -171,3 +171,12 @@ Computed client-side from the team's leads. Top to bottom:
 7. **Team leaderboard:** per rep — leads, 🔥 hot, follow-up rate, median speed; sorted by leads; top rep gets 🏆.
 8. **All leads:** search box (name, company, note) + filter chips (All / Hot / Warm / Cold / Needs follow-up) + the list.
 Empty state (no leads): illustration-style card "Your pipeline starts at the booth" + **Capture your first lead**.
+
+## CRM views (web, added 2026-11-26)
+
+Stages are **derived**, so no schema change is needed and Android stays compatible:
+`won`/`lost` from `status`; otherwise **Contacted** if `followedUpAt`, **Ready to send** if `email`, else **New**.
+Moving a lead: Ready (requires an email) = `status:"new", followedUpAt:null`; Contacted = `status:"followed_up"`, `followedUpAt ??= now`;
+Won/Lost = `status`. Tabs: Capture · **Pipeline** (Kanban, drag and drop) · **Leads** (sortable table, rep/temperature/search filters,
+CSV export) · Dashboard · Team. A lead opens in a side panel with a stage selector and an activity timeline built from
+`createdAt`, `sources`, `research`, `email`, `followedUpAt`, `updatedAt`.

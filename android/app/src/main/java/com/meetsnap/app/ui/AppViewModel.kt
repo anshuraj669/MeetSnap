@@ -40,7 +40,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
 
-enum class Tab { CAPTURE, LEADS, TEAM }
+enum class Tab { CAPTURE, PIPELINE, LEADS, STATS, TEAM }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = Repo()
@@ -93,6 +93,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var nanoProgress by mutableStateOf<String?>(null)
         private set
     val log = mutableStateListOf<AiLogEntry>()
+    var showAiLog by mutableStateOf(false)
+
+    // -- CRM filters (shared by Pipeline and Leads, like the web app) -------------------------
+    var search by mutableStateOf("")
+    var ownerFilter by mutableStateOf("all") // all | me | uid
+    var tempFilter by mutableStateOf("all") // all | hot | warm | cold | todo
+    var sortKey by mutableStateOf(SortKey.CREATED)
+    var sortDesc by mutableStateOf(true)
 
     // -- Capture form -------------------------------------------------------------------------
     var contact by mutableStateOf(Contact())
@@ -545,6 +553,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             mapOf("email" to Email(subject, body), "status" to "followed_up", "followedUpAt" to (lead.followedUpAt ?: System.currentTimeMillis())),
         )
     }
+
+    /** Moves a lead between CRM stages (rules in SPEC.md "CRM views"). */
+    fun moveStage(lead: Lead, to: Stage) {
+        val t = team ?: return
+        if (stageOf(lead) == to || to == Stage.NEW) return
+        val fields: Map<String, Any?> = when (to) {
+            Stage.READY -> {
+                if (lead.email == null) { toast = "The follow-up email is still being written."; return }
+                mapOf("status" to "new", "followedUpAt" to null)
+            }
+            Stage.CONTACTED -> mapOf("status" to "followed_up", "followedUpAt" to (lead.followedUpAt ?: System.currentTimeMillis()))
+            Stage.WON -> mapOf("status" to "won")
+            Stage.LOST -> mapOf("status" to "lost")
+            Stage.NEW -> return
+        }
+        repo.updateLead(t.id, lead.id, fields)
+        toast = "${lead.contact.name.ifBlank { lead.contact.company }} moved to ${to.label}"
+    }
+
+    /** Leads after the search / rep / temperature filters, sorted like the web table. */
+    fun filteredLeads(): List<Lead> = sortLeads(applyFilters(leads.toList(), search, ownerFilter, tempFilter, myUid), sortKey, sortDesc)
 
     fun setStatus(lead: Lead, status: String) {
         val t = team ?: return

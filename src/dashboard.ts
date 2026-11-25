@@ -1,6 +1,6 @@
 // The sales dashboard (Leads tab). Everything is computed from the team's leads on the client,
 // so it updates live with every Firestore snapshot. Layout and metrics are specified in SPEC.md.
-import { metrics, sortLeads, type Lead, type Score, type Source } from './store';
+import { metrics, type Lead, type Score, type Source } from './store';
 import { icon } from './icons';
 import { tidyEmail } from './ai';
 
@@ -104,14 +104,6 @@ function ring(p: number) {
   </svg>`;
 }
 
-function ago(t: number) {
-  const m = Math.round((Date.now() - t) / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  return h < 24 ? `${h} h ago` : new Date(t).toLocaleDateString();
-}
-
 const kpi = (label: string, value: string, sub: string, extra = '', cls = '') =>
   `<div class="card kpi ${cls}"><span class="k-label">${label}</span><div class="k-row"><span class="k-value">${value}</span>${extra}</div><span class="k-sub ${cls ? 'status' : ''}">${sub}</span></div>`;
 
@@ -165,13 +157,6 @@ export function viewDashboard(d: DashboardInput): string {
     })
     .sort((a, b) => b.leads - a.leads || b.hot - a.hot);
 
-  const q = d.search.trim().toLowerCase();
-  const shown = sortLeads(leads).filter((l) => {
-    if (d.filter === 'todo' ? l.followedUpAt || l.status === 'lost' : d.filter !== 'all' && l.score !== d.filter) return false;
-    if (!q) return true;
-    return [l.contact.name, l.contact.company, l.contact.title, l.note.transcript, l.note.summary, l.ownerName].join(' ').toLowerCase().includes(q);
-  });
-  const chip = (id: Filter, label: string) => `<button class="chip ${d.filter === id ? 'on' : ''}" data-a="filter" data-v="${id}">${label}</button>`;
   const maxHour = Math.max(1, ...hours.map((h) => h.n));
   const nowHour = new Date().getHours();
 
@@ -272,24 +257,5 @@ export function viewDashboard(d: DashboardInput): string {
     </div>
   </div>
 
-  <div class="card">
-    <div class="toolbar">
-      <div class="chips">${chip('all', 'All')}${chip('hot', 'Hot')}${chip('warm', 'Warm')}${chip('cold', 'Cold')}${chip('todo', 'Needs follow-up')}</div>
-      <div class="input-icon">${icon('search', 16)}<input id="search" type="search" placeholder="Search name, company or note" value="${esc(d.search)}" autocomplete="off"/></div>
-    </div>
-    <div class="lead-list">
-      ${
-        shown
-          .map(
-            (l) => `<button class="lead-row" data-a="open" data-id="${l.id}">
-              <span class="dot ${l.score}" title="${TEMP[l.score]}"></span>
-              <span class="who"><b>${esc(l.contact.name || l.contact.company || 'Unknown')}</b><span>${esc([l.contact.title, l.contact.company].filter(Boolean).join(' · '))}</span></span>
-              <span class="owner">${esc(l.ownerName)} · ${ago(l.createdAt)}</span>
-              <span class="meta">${statusBadge(l, d.online, d.myUid)}${icon('chevronRight', 16, 'faint')}</span>
-            </button>`,
-          )
-          .join('') || `<div class="no-match">No leads match${q ? ` “${esc(d.search)}”` : ' this filter'}.</div>`
-      }
-    </div>
-  </div>`;
+  <div class="row" style="justify-content:flex-end"><button class="btn" data-a="tab" data-v="leads">${icon('list', 16)} View all ${total} leads ${icon('arrowRight', 14)}</button></div>`;
 }
