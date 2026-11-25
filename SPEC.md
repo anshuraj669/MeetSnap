@@ -116,7 +116,7 @@ What they told us: {note.summary} Needs: {needs}. Timeline: {timeline or "unknow
 About their company: {research.about or "unknown"}.
 Lead temperature: {score}.
 Rules: under 150 words; mention one specific detail from the conversation; one clear call to action matching the next step;
-hot = propose a concrete meeting time slot, warm = offer something useful (pricing, a case study), cold = short and friendly, no pressure.
+hot = propose a concrete meeting time slot, warm = offer something useful (pricing, a case study), cold = short and friendly, no pressure. Never claim that anything is attached: offer to send it instead.
 Use a greeting line, 2-3 short paragraphs separated by blank lines, and a sign-off. No placeholders except [Your phone]. Sign off with {sellerName}.
 Reply with ONLY a JSON object: {"subject": string, "body": string}. In "body", write every line break as \n and put \n\n between paragraphs.
 ```
