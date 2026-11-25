@@ -235,9 +235,16 @@ Lead temperature: $score.
 Rules: under 150 words; mention one specific detail from the conversation; one clear call to action matching the next step;
 hot = propose a concrete meeting time slot, warm = offer something useful (pricing, a case study), cold = short and friendly, no pressure.
 Use a greeting line, 2-3 short paragraphs separated by blank lines, and a sign-off. No placeholders except [Your phone]. Sign off with $sellerName.
-Reply with ONLY a JSON object: {"subject": string, "body": string}""",
-    )
+Reply with ONLY a JSON object: {"subject": string, "body": string}. In "body", write every line break as \n and put \n\n between paragraphs.""",
+    ).let { it.copy(data = it.data.copy(body = tidyEmail(it.data.body))) }
 }
+
+/** Some models write line breaks inside JSON strings as "^" or a literal "\\n": turn them into real newlines. */
+fun tidyEmail(body: String): String = body
+    .replace("\\n", "\n")
+    .replace(Regex("[ \\t]*\\^[ \\t]*"), "\n")
+    .replace(Regex("\n{3,}"), "\n\n")
+    .trim()
 
 class OfflineNoModelException(cause: Throwable) :
     IllegalStateException("You're offline and Gemini Nano isn't available on this phone. Type the details; AI will finish this lead when you reconnect.", cause)

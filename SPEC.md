@@ -104,6 +104,8 @@ From your general knowledge, briefly describe this company for a salesperson. If
 Reply with ONLY a JSON object:
 {"about": 2 sentences, "industry": string, "sizeGuess": "small"|"mid-size"|"enterprise"|"unknown", "talkingPoints": [3 short strings: how what we sell could help them]}
 ```
+After the email task, both apps normalise the body: a literal `\n` or a `^` used as a line break becomes a real newline, and 3+ newlines collapse to a blank line.
+
 UI must label research "AI summary from model knowledge — verify before relying on it."
 
 **email**
@@ -116,7 +118,7 @@ Lead temperature: {score}.
 Rules: under 150 words; mention one specific detail from the conversation; one clear call to action matching the next step;
 hot = propose a concrete meeting time slot, warm = offer something useful (pricing, a case study), cold = short and friendly, no pressure.
 Use a greeting line, 2-3 short paragraphs separated by blank lines, and a sign-off. No placeholders except [Your phone]. Sign off with {sellerName}.
-Reply with ONLY a JSON object: {"subject": string, "body": string}
+Reply with ONLY a JSON object: {"subject": string, "body": string}. In "body", write every line break as \n and put \n\n between paragraphs.
 ```
 
 ## Screens (both apps)

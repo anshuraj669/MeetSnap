@@ -21,6 +21,7 @@ import {
   qualify,
   research,
   writeEmail,
+  tidyEmail,
   deviceAvailability,
   warmUpDeviceModel,
   onAiLog,
@@ -813,7 +814,7 @@ function viewLead(l: Lead) {
         l.email
           ? `<div class="card-body">
                <label class="field"><span class="field-label">Subject</span><input id="em-subject" value="${esc(l.email.subject)}"/></label>
-               <label class="field"><span class="field-label">Message</span><textarea id="em-body" rows="12">${esc(l.email.body)}</textarea></label>
+               <label class="field"><span class="field-label">Message</span><textarea id="em-body" rows="12">${esc(tidyEmail(l.email.body))}</textarea></label>
                ${l.followedUpAt ? `<p class="followed mt">${icon('checkCircle', 16)} Followed up ${Math.max(0, Math.round((l.followedUpAt - l.createdAt) / 60000))} min after the meeting</p>` : ''}
              </div>
              <div class="card-foot email-actions">
@@ -928,6 +929,10 @@ function logDrawer() {
   </aside>`;
 }
 
+const KEEP_FIELDS = ['a-email', 'a-name', 'a-pw', 'ob-name', 'ob-code', 'j-code', 't-name', 't-company', 't-offering', 't-event', 'p-name']
+  .map((id) => `#${id}`)
+  .join(',');
+
 function onAuthScreen() {
   return !s.user || s.authOpen || (s.user.isAnonymous && !s.profile && !s.guestChosen);
 }
@@ -953,11 +958,20 @@ function render() {
   const focusKey = active?.id || (active?.dataset?.f ? `f:${active.dataset.f}` : '');
   const caret = active && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
 
+  // Form fields that aren't kept in state would be emptied by the re-render (for example when a
+  // sign-in error appears, or a live Firestore update arrives while editing team settings): keep them.
+  const typed = new Map<string, string>();
+  root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(KEEP_FIELDS).forEach((el) => typed.set(el.id, el.value));
+
   root.innerHTML = `
     ${page}
     ${s.busy && !onAuthScreen() ? `<div class="busy"><div class="busy-card"><span class="spinner"></span>${esc(s.busy)}</div></div>` : ''}
     ${s.toast ? `<div class="toast" role="status">${icon('checkCircle', 16)}${esc(s.toast)}</div>` : ''}
     ${logDrawer()}`;
+  typed.forEach((value, id) => {
+    const el = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`);
+    if (el) el.value = value;
+  });
   const slot = root.querySelector('#cam-slot');
   if (slot) slot.appendChild(video);
   if (focusKey) {

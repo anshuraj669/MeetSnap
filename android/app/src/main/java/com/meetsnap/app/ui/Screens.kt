@@ -398,8 +398,9 @@ fun LeadDetail(vm: AppViewModel, l: Lead) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var subject by remember(l.id, l.email) { mutableStateOf(l.email?.subject.orEmpty()) }
-    var body by remember(l.id, l.email) { mutableStateOf(l.email?.body.orEmpty()) }
-    val edited = l.email != null && (subject != l.email?.subject || body != l.email?.body)
+    val savedBody = com.meetsnap.app.ai.tidyEmail(l.email?.body.orEmpty())
+    var body by remember(l.id, l.email) { mutableStateOf(savedBody) }
+    val edited = l.email != null && (subject != l.email?.subject || body != savedBody)
 
     ScreenWithBar(bar = if (l.email == null) null else ({
         SecondaryAction("Copy") {

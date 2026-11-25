@@ -58,4 +58,8 @@ private val shapes = Shapes(small = RoundedCornerShape(10.dp), medium = RoundedC
 
 @Composable
 fun MeetSnapTheme(content: @Composable () -> Unit) =
-    MaterialTheme(colorScheme = colors, typography = type, shapes = shapes, content = content)
+    MaterialTheme(colorScheme = colors, typography = type, shapes = shapes) {
+        // Text outside a Material Surface uses LocalContentColor, which defaults to black: make the
+        // app's light text colour the default so headings stay readable on the dark background.
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides TextC, content = content)
+    }

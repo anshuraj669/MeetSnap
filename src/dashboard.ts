@@ -2,6 +2,7 @@
 // so it updates live with every Firestore snapshot. Layout and metrics are specified in SPEC.md.
 import { metrics, sortLeads, type Lead, type Score, type Source } from './store';
 import { icon } from './icons';
+import { tidyEmail } from './ai';
 
 export type Filter = 'all' | Score | 'todo';
 
@@ -52,7 +53,7 @@ export function statusBadge(l: Lead, online: boolean, myUid: string) {
 
 export function mailtoFor(l: Lead) {
   if (!l.email || !l.contact.email) return '';
-  return `mailto:${encodeURIComponent(l.contact.email)}?subject=${encodeURIComponent(l.email.subject)}&body=${encodeURIComponent(l.email.body)}`;
+  return `mailto:${encodeURIComponent(l.contact.email)}?subject=${encodeURIComponent(l.email.subject)}&body=${encodeURIComponent(tidyEmail(l.email.body))}`;
 }
 
 /** Speed-to-follow-up status: an icon and words always accompany the colour. */

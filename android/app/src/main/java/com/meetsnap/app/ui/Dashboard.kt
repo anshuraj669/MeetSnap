@@ -220,7 +220,7 @@ private fun ActNow(vm: AppViewModel, all: List<Lead>, now: Long) {
             }
             if (l.contact.email.isNotBlank()) {
                 Button(
-                    onClick = { vm.sendEmail(ctx, l, l.email!!.subject, l.email!!.body) },
+                    onClick = { vm.sendEmail(ctx, l, l.email!!.subject, com.meetsnap.app.ai.tidyEmail(l.email!!.body)) },
                     shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = OnAccent),
                 ) { Text("✉️ Send", fontWeight = FontWeight.Bold) }

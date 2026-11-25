@@ -264,6 +264,15 @@ export interface EmailInput {
   score: Score;
 }
 
+/** Some models write line breaks inside JSON strings as "^" or a literal "\\n": turn them into real newlines. */
+export function tidyEmail(body: string): string {
+  return String(body ?? '')
+    .replace(/\\n/g, '\n')
+    .replace(/[ \t]*\^[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export const writeEmail = (i: EmailInput) =>
   run<EmailDraft>('email', InferenceMode.PREFER_IN_CLOUD, EMAIL_SCHEMA, [
     `Write a follow-up email from ${or(i.sellerName, 'the salesperson')} at ${or(i.sellerCompany, 'our company')} to ${or(i.contact.name, 'the contact')}, ${or(i.contact.title, 'unknown title')} at ${or(i.contact.company, 'their company')}, after meeting at ${or(i.event, 'our meeting')}.
@@ -274,5 +283,5 @@ Lead temperature: ${i.score}.
 Rules: under 150 words; mention one specific detail from the conversation; one clear call to action matching the next step;
 hot = propose a concrete meeting time slot, warm = offer something useful (pricing, a case study), cold = short and friendly, no pressure.
 Use a greeting line, 2-3 short paragraphs separated by blank lines, and a sign-off. No placeholders except [Your phone]. Sign off with ${or(i.sellerName, 'the salesperson')}.
-Reply with ONLY a JSON object: {"subject": string, "body": string}`,
-  ]);
+Reply with ONLY a JSON object: {"subject": string, "body": string}. In "body", write every line break as \\n and put \\n\\n between paragraphs.`,
+  ]).then((r) => ({ ...r, data: { ...r.data, body: tidyEmail(r.data.body) } }));
