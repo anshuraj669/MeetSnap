@@ -102,6 +102,20 @@ fun AuthScreen(vm: AppViewModel) {
                 vm.authInfo?.let { NoteBox(it, Ok) }
                 vm.error?.let { NoteBox(it, Bad) }
                 Spacer(Modifier.height(10.dp))
+                if (mode != "reset") {
+                    val activity = androidx.compose.ui.platform.LocalContext.current
+                    OutlinedButton(
+                        onClick = { vm.signInWithGoogle(activity) }, enabled = !busy, shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().height(50.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Line),
+                    ) {
+                        Image(painterResource(R.drawable.ic_google), null, Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("Continue with Google", color = TextC, fontWeight = FontWeight.SemiBold)
+                    }
+                    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        HorizontalDivider(Modifier.weight(1f), color = Line); Text("  or with email  ", color = Muted, fontSize = 12.sp); HorizontalDivider(Modifier.weight(1f), color = Line)
+                    }
+                }
                 if (mode == "signup") {
                     OutlinedTextField(
                         name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Full name") }, singleLine = true, colors = fieldColors(),

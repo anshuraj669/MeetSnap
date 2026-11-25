@@ -69,6 +69,10 @@ dependencies {
     implementation("com.google.firebase:firebase-ai")
     implementation("com.google.firebase:firebase-ai-ondevice:16.0.0-beta08") // not in the BoM yet
     implementation("com.google.firebase:firebase-auth")
+    // Sign in with Google via Android Credential Manager
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-config")
     implementation("com.google.firebase:firebase-appcheck-playintegrity")

@@ -521,3 +521,5 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); box-sh
 .drawer .table th, .drawer .table td { padding: 8px 10px; }
 @media (max-width: 600px) { .hide-sm { display: none; } }
 .i.device { color: var(--device); }
+.google-btn { gap: 10px; color: var(--text); font-weight: 600; }
+.auth-card .google-btn { margin-top: 0; }

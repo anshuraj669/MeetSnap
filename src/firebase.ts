@@ -10,6 +10,11 @@ import {
   sendEmailVerification,
   linkWithCredential,
   EmailAuthProvider,
+  GoogleAuthProvider,
+  signInWithPopup,
+  linkWithPopup,
+  signInWithRedirect,
+  signInWithCredential,
   signOut,
   updateProfile,
   type User,
@@ -71,6 +76,37 @@ export const resetPassword = (email: string) => sendPasswordResetEmail(auth, ema
 export const resendVerification = () => (auth.currentUser ? sendEmailVerification(auth.currentUser) : Promise.resolve());
 export const logout = () => signOut(auth);
 
+/**
+ * Continue with Google. A guest keeps their uid (and so their team and leads) by linking the Google
+ * account to it. If that Google account already has a MeetSnap account, we sign in to it instead
+ * (the guest's data is not merged).
+ */
+export async function signInWithGoogle(): Promise<User> {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  const current = auth.currentUser;
+  try {
+    if (current?.isAnonymous) {
+      try {
+        return (await linkWithPopup(current, provider)).user;
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        if (code !== 'auth/credential-already-in-use' && code !== 'auth/email-already-in-use') throw e;
+        const cred = GoogleAuthProvider.credentialFromError(e as never);
+        if (!cred) throw e;
+        return (await signInWithCredential(auth, cred)).user;
+      }
+    }
+    return (await signInWithPopup(auth, provider)).user;
+  } catch (e) {
+    // Some browsers block pop-ups: fall back to a full-page redirect.
+    if ((e as { code?: string }).code === 'auth/popup-blocked') {
+      await signInWithRedirect(auth, provider);
+    }
+    throw e;
+  }
+}
+
 /** Creates an account. A guest keeps their uid (and so their team and leads) by linking the new email to it. */
 export async function signUpWithEmail(name: string, email: string, password: string): Promise<User> {
   const current = auth.currentUser;
@@ -99,6 +135,11 @@ export function authErrorMessage(e: unknown): string {
     'auth/too-many-requests': 'Too many attempts. Wait a minute and try again.',
     'auth/network-request-failed': 'No connection. Connect to sign in; after that MeetSnap works offline.',
     'auth/operation-not-allowed': 'This sign-in method is not enabled yet (Firebase console → Authentication → Sign-in method).',
+    'auth/popup-closed-by-user': 'The Google sign-in window was closed before it finished.',
+    'auth/cancelled-popup-request': 'The Google sign-in window was closed before it finished.',
+    'auth/popup-blocked': 'The browser blocked the Google sign-in window. Allow pop-ups for this site and try again.',
+    'auth/unauthorized-domain': 'This domain is not authorized for sign-in (Firebase console → Authentication → Settings → Authorized domains).',
+    'auth/account-exists-with-different-credential': 'This email already has an account with a password. Sign in with your email and password instead.',
     'auth/admin-restricted-operation': 'Guest mode is not enabled yet (Firebase console → Authentication → Anonymous).',
   };
   return map[code] ?? (e instanceof Error ? e.message : String(e));

@@ -215,6 +215,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun continueAsGuest() = authGuard("Starting…") { repo.continueAsGuest() }
 
+    /**
+     * "Continue with Google" using Android Credential Manager. Needs an Activity context (it shows the
+     * system account picker) and the app's SHA-1 registered in Firebase (Project settings → Android app).
+     */
+    fun signInWithGoogle(activity: Context) {
+        if (busy != null) return
+        viewModelScope.launch {
+            busy = "Connecting to Google…"; error = null; authInfo = null
+            try {
+                val option = com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+                    .Builder(activity.getString(com.meetsnap.app.R.string.default_web_client_id))
+                    .build()
+                val request = androidx.credentials.GetCredentialRequest.Builder().addCredentialOption(option).build()
+                val result = androidx.credentials.CredentialManager.create(activity).getCredential(activity, request)
+                val cred = result.credential
+                if (cred !is androidx.credentials.CustomCredential ||
+                    cred.type != com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                ) error("Unexpected credential type: ${cred.type}")
+                val token = com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.createFrom(cred.data).idToken
+                val guestUid = if (isGuest && profile != null) user?.uid else null
+                val u = repo.signInWithGoogle(token)
+                if (guestUid != null && u.uid == guestUid) {
+                    // Linking keeps the same uid, so the auth listener doesn't fire: refresh by hand.
+                    user = u; userRev++
+                    authOpen = false
+                    toast = "Signed in with Google. Your team and leads are saved to this account."
+                } else authOpen = false
+            } catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) {
+                // The user closed the account picker: nothing to report.
+            } catch (e: androidx.credentials.exceptions.NoCredentialException) {
+                error = "No Google account is available on this phone. Add one in Settings → Accounts, then try again."
+            } catch (e: androidx.credentials.exceptions.GetCredentialException) {
+                Log.w("MeetSnap", "Google sign-in", e)
+                error = "Google sign-in failed (${e.type.substringAfterLast('.')}). Check that this app's SHA-1 is registered in Firebase."
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w("MeetSnap", "Google sign-in", e)
+                error = authMessage(e)
+            } finally { busy = null }
+        }
+    }
+
     fun resendVerification() = viewModelScope.launch {
         runCatching { repo.resendVerification() }
             .onSuccess { toast = "Verification email sent to $email" }

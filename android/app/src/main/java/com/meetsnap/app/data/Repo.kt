@@ -2,6 +2,8 @@ package com.meetsnap.app.data
 
 import com.google.firebase.Firebase
 import com.google.firebase.auth.EmailAuthProvider
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.auth.auth
@@ -65,6 +67,24 @@ class Repo {
         if (name.isNotBlank()) user.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(name.trim()).build()).await()
         user.sendEmailVerification().addOnFailureListener { Log.w("MeetSnap", "verification email", it) }
         return user
+    }
+
+    /**
+     * Signs in with a Google ID token from Credential Manager. A guest's account is *linked*, so the
+     * uid (and their team and leads) stay the same. If that Google account already has a MeetSnap
+     * account, we sign in to it instead (the guest's data is not merged).
+     */
+    suspend fun signInWithGoogle(idToken: String): FirebaseUser {
+        val credential = GoogleAuthProvider.getCredential(idToken, null)
+        val current = auth.currentUser
+        if (current != null && current.isAnonymous) {
+            try {
+                return current.linkWithCredential(credential).await().user!!
+            } catch (e: FirebaseAuthUserCollisionException) {
+                return auth.signInWithCredential(e.updatedCredential ?: credential).await().user!!
+            }
+        }
+        return auth.signInWithCredential(credential).await().user!!
     }
 
     suspend fun signIn(email: String, password: String) { auth.signInWithEmailAndPassword(email, password).await() }

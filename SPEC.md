@@ -136,7 +136,9 @@ hot `#F97316`, warm `#EAB308`, cold `#64748B`.
 
 ## Accounts (added 2026-11-25)
 
-Firebase Auth **Email/Password** (plus **Continue as guest** = anonymous). Both apps:
+Firebase Auth **Email/Password** and **Google** (plus **Continue as guest** = anonymous). Both apps:
+
+- **Continue with Google** above the email form (Sign in and Create account). Web: `signInWithPopup` (redirect fallback when pop-ups are blocked). Android: Credential Manager `GetSignInWithGoogleOption` with `default_web_client_id`, then `GoogleAuthProvider.getCredential(idToken)`; needs the app's SHA-1 in Firebase. A guest with a team *links* Google (same uid, data kept); if the Google account already exists, sign in to it instead (guest data not merged).
 
 - **Auth screen** (shown when signed out): tabs **Sign in** / **Create account**.
   - Sign in: email, password (show/hide), **Forgot password?** link, primary button.

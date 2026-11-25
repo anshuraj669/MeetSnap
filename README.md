@@ -181,5 +181,9 @@ If you host it on another domain, add that domain to your reCAPTCHA Enterprise k
 - **The Firebase web config in the live site is public by design.** Firebase web API keys identify the project; they don't grant access. Access is controlled by **App Check**, which blocks clients other than the real app from the Gemini API, and by **Firestore security rules**: you can only read and write your own profile and your own team's leads.
 - **AI output is labelled.** Company research comes from the model's general knowledge, and the app marks it *"verify before relying on it"*.
 
+## Privacy and terms
+- [Privacy Policy](https://meetsnap-1f09da.web.app/privacy) ([source](public/privacy.html))
+- [Terms of Service](https://meetsnap-1f09da.web.app/terms) ([source](public/terms.html))
+
 ## License
 Copyright 2026 **Anshu Raj**. Licensed under the [Apache License 2.0](LICENSE); see also [NOTICE](NOTICE).
