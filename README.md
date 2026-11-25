@@ -1,5 +1,7 @@
 # 📇 MeetSnap: from handshake to follow-up in a minute
 
+*By **Anshu Raj** · #BuildHybridAI 2026*
+
 > Snap a business card, speak a 20-second note, and MeetSnap scores the lead and writes a personal follow-up email. Your sales manager watches it arrive on a live dashboard. It keeps working on terrible trade-show Wi-Fi.
 
 **🌐 Live web app: <https://meetsnap-1f09da.web.app>**
@@ -73,6 +75,8 @@ src/                 Web app (Vite + TypeScript, no framework)
 android/             Android app (Kotlin, Jetpack Compose, CameraX), same features
 SPEC.md              Shared spec for both apps
 firestore.rules      Security rules
+Dockerfile           Web app image (build + nginx), see docker/nginx.conf
+.github/workflows/   CI/CD: build, test, deploy to Firebase on push to main
 ```
 
 ## Run it yourself
@@ -117,6 +121,48 @@ To deploy: `npm run build && firebase deploy --only hosting`.
    ```
 4. On a phone that supports Gemini Nano (for example Pixel 9 or newer, Galaxy S24 or newer), the model is used automatically once AICore has downloaded it. On other phones, MeetSnap uses cloud fallback.
 
+## CI/CD: push to `main` and it goes live
+[`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) runs on GitHub Actions:
+
+| When | Job | What it does |
+|---|---|---|
+| Every push and pull request | **Web** | `npm ci` → type-check → production build (fails the PR if anything breaks) |
+| Every push and pull request | **Docker** | Builds the Docker image to prove the build still works |
+| Every push and pull request | **Android** | Builds the debug APK and attaches it to the run (only when `GOOGLE_SERVICES_JSON` is set) |
+| Push to `main` | **Deploy** | Deploys the exact web build that passed CI, plus `firestore.rules`, to Firebase, then smoke-tests <https://meetsnap-1f09da.web.app> |
+
+So the workflow is: **edit → commit → `git push` → live in about 2 minutes.** Pull requests get checks but are never deployed.
+
+### One-time setup
+1. **Create a deploy service account.**
+   1. In [Google Cloud console → IAM → Service accounts](https://console.cloud.google.com/iam-admin/serviceaccounts?project=meetsnap-1f09da), click **Create service account** and name it `github-deploy`.
+   2. Give it these roles: **Firebase Hosting Admin**, **Firebase Rules Admin**, **Service Usage Consumer**.
+   3. Open the account → **Keys → Add key → JSON**, and download it. Treat this file like a password: never commit it, and delete it after the next step.
+2. **Add repository secrets** in GitHub → **Settings → Secrets and variables → Actions → New repository secret**:
+
+   | Secret | Value |
+   |---|---|
+   | `FIREBASE_SERVICE_ACCOUNT` | The whole JSON key file from step 1 |
+   | `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`, `VITE_RECAPTCHA_ENTERPRISE_SITE_KEY` | The same values as in your `.env.local` |
+   | `GOOGLE_SERVICES_JSON` *(optional)* | The contents of `android/app/google-services.json`, to build the APK in CI |
+   | `ANDROID_APPCHECK_DEBUG_TOKEN` *(optional)* | An App Check debug token for the CI APK. Anyone with that APK can use the token, so only share the APK with people you trust (e.g. judges), and revoke the token afterwards |
+
+   With the [GitHub CLI](https://cli.github.com/) you can add the web values in one go from the project folder:
+   ```bash
+   grep -E '^VITE_(FIREBASE_[A-Z_]+|RECAPTCHA_ENTERPRISE_SITE_KEY)=' .env.local > /tmp/ms-web.env && gh secret set -f /tmp/ms-web.env && rm /tmp/ms-web.env
+   gh secret set FIREBASE_SERVICE_ACCOUNT < path/to/github-deploy-key.json
+   ```
+3. Push to `main`, and watch it deploy in the repository's **Actions** tab.
+
+## Docker
+The [`Dockerfile`](Dockerfile) builds the web app and serves it with a non-root nginx on port 8080, with the same routing and caching as Firebase Hosting. The live site doesn't need Docker (it runs on Firebase Hosting); the image is for running MeetSnap anywhere else: locally, on Cloud Run, or on any container host.
+```bash
+# Build with your public Firebase web config (the same values as .env.local)
+docker build -t meetsnap $(grep -E '^VITE_(FIREBASE_[A-Z_]+|RECAPTCHA_ENTERPRISE_SITE_KEY)=' .env.local | sed 's/^/--build-arg /') .
+docker run -p 8080:8080 meetsnap          # open http://localhost:8080
+```
+If you host it on another domain, add that domain to your reCAPTCHA Enterprise key and to Firebase **Authentication → Settings → Authorized domains**. `.dockerignore` keeps `.env.local`, Android config and keys out of the image.
+
 ## Try the demo flow
 1. **Create an account** (or continue as a guest). A team and a join code are created for you.
 2. In **Team**, fill in *What you sell* and the *Current event*.
@@ -136,4 +182,4 @@ To deploy: `npm run build && firebase deploy --only hosting`.
 - **AI output is labelled.** Company research comes from the model's general knowledge, and the app marks it *"verify before relying on it"*.
 
 ## License
-[Apache 2.0](LICENSE)
+Copyright 2026 **Anshu Raj**. Licensed under the [Apache License 2.0](LICENSE); see also [NOTICE](NOTICE).

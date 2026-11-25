@@ -1,0 +1,20 @@
+# Keep secrets and large folders out of the Docker build context.
+.env
+.env.*
+!.env.example
+*.local
+android/
+node_modules/
+dist/
+.git/
+.github/
+.firebase/
+*.log
+google-services.json
+local.properties
+*.jks
+*.keystore
+service-account*.json
+*-adminsdk-*.json
+README.md
+SPEC.md
