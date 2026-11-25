@@ -1,3 +1,8 @@
+# check=skip=SecretsUsedInArgOrEnv
+# ^ BuildKit parser directive (must stay on line 1). The VITE_* build args are the PUBLIC Firebase
+#   web config, which is shipped in the JavaScript bundle by design, so this lint rule is a false positive.
+#   Real secrets (service-account keys, App Check debug tokens) must never be passed as build args.
+
 # MeetSnap web app: reproducible build + a small, non-root static server.
 #
 # The live site is deployed to Firebase Hosting by the CI/CD pipeline (.github/workflows/ci-cd.yml).

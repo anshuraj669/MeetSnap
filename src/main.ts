@@ -13,7 +13,8 @@ import {
   logout,
   authErrorMessage,
 } from './firebase';
-import { viewDashboard, type Filter } from './dashboard';
+import { viewDashboard, mailtoFor, statusBadge, scoreBadge, sourceBadge, type Filter } from './dashboard';
+import { icon } from './icons';
 import {
   readCard,
   qualify,
@@ -80,6 +81,10 @@ interface State {
   showPw: boolean;
   verifyHidden: boolean;
   search: string;
+  /** The user chose "Continue as a guest" (a leftover anonymous session without a team otherwise shows sign-in). */
+  guestChosen: boolean;
+  menuOpen: boolean;
+  obMode: 'create' | 'join';
 }
 
 const s: State = {
@@ -111,6 +116,9 @@ const s: State = {
   showPw: false,
   verifyHidden: false,
   search: '',
+  guestChosen: false,
+  menuOpen: false,
+  obMode: 'create',
 };
 
 function loadLog(): AiLogEntry[] {
@@ -150,12 +158,7 @@ function toast(text: string) {
 const esc = (v: unknown) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-const badge = (src: Source | null | undefined, ms?: number | null) =>
-  src
-    ? `<span class="src ${src}" title="Where this AI answer was computed">${src === 'on_device' ? '⚡ On-device' : '☁️ Cloud'}${ms != null ? ` · ${ms} ms` : ''}</span>`
-    : '';
-
-const scoreChip = (sc: Score) => `<span class="score ${sc}">${sc === 'hot' ? '🔥 Hot' : sc === 'warm' ? 'Warm' : 'Cold'}</span>`;
+const badge = (src: Source | null | undefined, ms?: number | null) => sourceBadge(src, ms);
 
 const uid = () => s.user?.uid ?? '';
 const teamId = () => s.profile?.teamId ?? '';
@@ -262,7 +265,7 @@ async function saveLead() {
   });
   seenLeads.add(lead.id);
   resetCapture();
-  toast(`${score === 'hot' ? '🔥 Hot' : score === 'warm' ? 'Warm' : 'Cold'} lead saved: ${c.name || c.company}${s.online ? '. Writing the follow-up…' : '. Follow-up will be written when you are back online.'}`);
+  toast(`${score === 'hot' ? 'Hot' : score === 'warm' ? 'Warm' : 'Cold'} lead saved: ${c.name || c.company}. ${s.online ? 'Writing the follow-up…' : 'The follow-up is written when you reconnect.'}`);
   render();
   processCloud(lead); // research + email in the background; never blocks the next capture
 }
@@ -383,7 +386,7 @@ async function signOutNow() {
   unwatchTeam = unwatchLeads = null;
   seenLeads.clear();
   resetCapture();
-  Object.assign(s, { tab: 'capture', leadId: null, filter: 'all', search: '', authMode: 'signin', authOpen: false, verifyHidden: false });
+  Object.assign(s, { tab: 'capture', leadId: null, filter: 'all', search: '', authMode: 'signin', authOpen: false, verifyHidden: false, guestChosen: false, menuOpen: false, logOpen: false });
   await logout();
 }
 
@@ -424,7 +427,7 @@ function onProfile(p: Profile) {
     // Live dashboard: tell the manager when a teammate captures a lead.
     if (!first) {
       for (const l of leads) {
-        if (!seenLeads.has(l.id) && l.ownerUid !== uid()) toast(`New ${l.score === 'hot' ? '🔥 hot ' : ''}lead from ${l.ownerName}: ${l.contact.name || l.contact.company}`);
+        if (!seenLeads.has(l.id) && l.ownerUid !== uid()) toast(`New ${l.score === 'hot' ? 'hot ' : ''}lead from ${l.ownerName}: ${l.contact.name || l.contact.company}`);
       }
     }
     leads.forEach((l) => seenLeads.add(l.id));
@@ -449,117 +452,226 @@ async function enableNano() {
 // ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
-function header() {
-  const nanoText: Record<string, string> = {
-    available: '⚡ Gemini Nano ready',
-    downloadable: '⬇ Nano: tap to enable',
-    downloading: '⬇ Nano downloading…',
-    unavailable: '☁️ Cloud AI',
-    unsupported: '☁️ Cloud AI',
-    checking: '…',
-  };
-  const progress = s.nanoProgress != null ? ` ${Math.round(s.nanoProgress * 100)}%` : '';
-  const dev = s.log.filter((l) => l.source === 'on_device').length;
-  const cloud = s.log.filter((l) => l.source === 'in_cloud').length;
-  return `
-  <header>
-    <div class="brand"><img src="/favicon.svg" width="30" height="30" alt=""/><span>Meet<b>Snap</b></span>${s.team?.event ? `<span class="event">@ ${esc(s.team.event)}</span>` : ''}</div>
-    <div class="pills">
-      <span class="pill ${s.online ? 'ok' : 'warn'}">${s.online ? '● Online' : '● Offline'}</span>
-      <button class="pill ${s.nano === 'available' ? 'ok' : ''}" data-a="nano">${nanoText[s.nano] ?? s.nano}${progress}</button>
-      <button class="pill" data-a="log">AI log ⚡${dev} ☁️${cloud}</button>
-    </div>
-  </header>`;
+const initials = (name: string) =>
+  name
+    .split(/[\s@.]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]!.toUpperCase())
+    .join('') || '?';
+
+function aiStatus(): { icon: string; label: string; cls: string; action: string } {
+  const pct = s.nanoProgress != null ? ` ${Math.round(s.nanoProgress * 100)}%` : '';
+  switch (s.nano) {
+    case 'available':
+      return { icon: 'cpu', label: 'On-device AI ready', cls: 'on_device', action: 'log' };
+    case 'downloadable':
+      return { icon: 'download', label: 'Enable on-device AI', cls: '', action: 'nano' };
+    case 'downloading':
+      return { icon: 'download', label: `Downloading model${pct}`, cls: '', action: 'log' };
+    case 'checking':
+      return { icon: 'activity', label: 'Checking AI…', cls: '', action: 'log' };
+    default:
+      return { icon: 'cloud', label: 'Cloud AI', cls: 'in_cloud', action: 'log' };
+  }
 }
 
-function tabs() {
-  if (!s.profile) return '';
-  const todo = s.leads.filter((l) => l.email && !l.followedUpAt).length;
-  const t = (id: Tab, label: string, extra = '') =>
-    `<button class="tab ${s.tab === id && !s.leadId ? 'on' : ''}" data-a="tab" data-v="${id}">${label}${extra}</button>`;
-  return `<nav class="tabs">${t('capture', '📇 Capture')}${t('leads', '📊 Leads', todo ? ` <span class="count">${todo}</span>` : '')}${t('team', '👥 Team')}</nav>`;
+function accountMenu() {
+  const u = s.user;
+  if (!u) return '';
+  const guest = u.isAnonymous;
+  const name = s.profile?.name || u.displayName || (guest ? 'Guest' : u.email ?? 'Account');
+  return `<div class="acct">
+    <button class="acct-btn" data-a="menu" aria-haspopup="menu" aria-expanded="${s.menuOpen}">
+      <span class="avatar ${guest ? 'guest' : ''}">${guest ? icon('user', 14) : esc(initials(name))}</span>
+      <span class="acct-name">${esc(name)}</span>${icon('chevronDown', 14, 'faint')}
+    </button>
+    ${
+      s.menuOpen
+        ? `<div class="menu" role="menu">
+            <div class="menu-head"><b>${esc(name)}</b><span>${guest ? 'Guest session · data stays on this device' : esc(u.email ?? '')}</span></div>
+            ${
+              guest
+                ? `<button class="menu-item" data-a="upgrade">${icon('user', 16)} Create an account</button>
+                   <button class="menu-item" data-a="signin-open">${icon('login', 16)} Sign in to an existing account</button>`
+                : s.profile
+                  ? `<button class="menu-item" data-a="tab" data-v="team">${icon('users', 16)} Team & settings</button>`
+                  : ''
+            }
+            <button class="menu-item" data-a="log">${icon('activity', 16)} AI activity</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item danger" data-a="logout">${icon('logout', 16)} ${guest ? 'End guest session' : 'Sign out'}</button>
+          </div>`
+        : ''
+    }
+  </div>`;
+}
+
+const TITLES: Record<Tab, [string, string]> = {
+  capture: ['Capture a lead', 'Scan the card, record the conversation, save. Ready for the next visitor in seconds.'],
+  leads: ['Leads', 'Your team’s pipeline, live.'],
+  team: ['Team & settings', 'What you sell, the current event, and who is on your team.'],
+};
+
+function todoCount() {
+  return s.leads.filter((l) => l.email && !l.followedUpAt && l.status === 'new').length;
+}
+
+function shell(body: string) {
+  const ai = aiStatus();
+  const todo = todoCount();
+  const [title, sub] = s.leadId ? ['Lead', 'Contact, qualification and follow-up email'] : TITLES[s.tab];
+  const nav = (id: Tab, ic: string, label: string, count = 0) =>
+    `<button class="nav-item ${s.tab === id && !s.leadId ? 'on' : ''}" data-a="tab" data-v="${id}">${icon(ic, 18)}<span>${label}</span>${count ? `<span class="nav-count">${count}</span>` : ''}</button>`;
+  const bnav = (id: Tab, ic: string, label: string, count = 0) =>
+    `<button class="${s.tab === id ? 'on' : ''}" data-a="tab" data-v="${id}">${icon(ic, 20)}${label}${count ? `<span class="nav-count">${count}</span>` : ''}</button>`;
+  return `
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><img src="/favicon.svg" alt=""/>MeetSnap</div>
+      ${s.team ? `<div class="workspace"><b>${esc(s.team.name)}</b><span>${esc(s.team.event || 'No event set')}</span></div>` : ''}
+      <nav class="nav">
+        ${nav('capture', 'scan', 'Capture')}
+        ${nav('leads', 'chart', 'Leads', todo)}
+        ${nav('team', 'users', 'Team & settings')}
+      </nav>
+      <div class="side-foot">
+        <div class="ai-box">
+          <div class="row">${icon(ai.icon, 16, ai.cls === 'on_device' ? 'device' : '')}<b>${ai.label}</b></div>
+          <p>${s.nano === 'available' ? 'Cards and notes are processed on this device.' : 'Cards and notes fall back to cloud Gemini.'}</p>
+          <button class="btn btn-sm btn-block" data-a="${ai.action === 'nano' ? 'nano' : 'log'}">${ai.action === 'nano' ? `${icon('download', 14)} Download model` : `${icon('activity', 14)} View AI activity`}</button>
+        </div>
+        <div class="conn ${s.online ? '' : 'off'}"><i></i>${s.online ? 'Online · synced' : 'Offline · changes saved locally'}</div>
+      </div>
+    </aside>
+    <div class="main-col">
+      <header class="topbar">
+        <div class="mobile-brand"><img src="/favicon.svg" alt=""/>MeetSnap</div>
+        <div class="title-block"><h1>${title}</h1><div class="sub">${sub}</div></div>
+        <div class="top-actions">
+          <button class="badge ${ai.cls}" style="height:30px;cursor:pointer" data-a="${ai.action}" title="Hybrid AI status">${icon(ai.icon, 14)}<span class="hide-sm">${ai.label}</span></button>
+          ${accountMenu()}
+        </div>
+      </header>
+      ${s.online ? '' : `<div class="banner">${icon('wifiOff', 16)} You're offline. ${s.nano === 'available' ? 'Cards and notes are still read on-device.' : 'Type the details; leads are saved on this device.'} Emails are written when you reconnect.</div>`}
+      <main class="content">
+        ${s.error ? `<div class="alert error">${icon('alert', 16)}<div>${esc(s.error)}</div><button class="btn btn-ghost btn-sm icon-btn" data-a="dismiss" aria-label="Dismiss">${icon('x', 16)}</button></div>` : ''}
+        ${verifyBanner()}
+        ${body}
+      </main>
+    </div>
+    <nav class="bottom-nav">${bnav('capture', 'scan', 'Capture')}${bnav('leads', 'chart', 'Leads', todo)}${bnav('team', 'users', 'Team')}</nav>
+  </div>`;
 }
 
 function viewAuth() {
   const m = s.authMode;
-  const guest = !!s.user?.isAnonymous;
+  const upgrading = !!s.user?.isAnonymous && !!s.profile; // a guest with data, saving it to an account
+  const busy = !!s.busy;
   const tab = (id: 'signin' | 'signup', label: string) =>
     `<button type="button" class="seg-btn ${m === id ? 'on' : ''}" data-a="auth-mode" data-v="${id}">${label}</button>`;
+  const title = m === 'signup' ? (upgrading ? 'Save your work' : 'Create your account') : m === 'reset' ? 'Reset your password' : 'Welcome back';
+  const sub =
+    m === 'signup'
+      ? upgrading
+        ? 'Your team and leads move into your new account.'
+        : 'Free for your whole team. Takes less than a minute.'
+      : m === 'reset'
+        ? "Enter the email you signed up with and we'll send you a reset link."
+        : 'Sign in to pick up your team’s pipeline.';
+  const point = (ic: string, t: string, d: string) => `<li><span class="pi">${icon(ic, 18)}</span><div><b>${t}</b><span>${d}</span></div></li>`;
   return `
-  <section class="auth">
-    <div class="auth-pitch">
-      <img src="/favicon.svg" width="56" height="56" alt=""/>
-      <h1>From handshake to follow-up <span class="grad">in a minute.</span></h1>
-      <p class="muted">Snap a business card, speak a 20-second note, and MeetSnap scores the lead and writes the follow-up email. Your manager watches the pipeline fill up live.</p>
-      <ul class="pitch-list">
-        <li><b>⚡ On-device AI</b> reads cards and scores leads on terrible trade-show Wi-Fi</li>
-        <li><b>☁️ Cloud AI</b> researches the company and writes a personal email</li>
-        <li><b>📊 Live dashboard</b> shows hot leads and speed to follow-up</li>
-      </ul>
-    </div>
-    <form class="card auth-card" data-a="auth-form" novalidate>
-      ${m !== 'reset' ? `<div class="seg">${tab('signin', 'Sign in')}${tab('signup', 'Create account')}</div>` : ''}
-      <h2>${m === 'signup' ? (guest ? 'Save your work' : 'Create your account') : m === 'reset' ? 'Reset your password' : 'Welcome back'}</h2>
-      <p class="muted small">${
-        m === 'signup'
-          ? guest
-            ? 'Your team and leads move into your new account.'
-            : 'Free for your whole team. Takes 20 seconds.'
-          : m === 'reset'
-            ? "Enter your email and we'll send you a link to choose a new password."
-            : 'Sign in to see your team’s pipeline.'
-      }</p>
-      ${s.authInfo ? `<div class="info">${esc(s.authInfo)}</div>` : ''}
-      ${s.error ? `<div class="error">${esc(s.error)}</div>` : ''}
-      ${m === 'signup' ? `<label>Full name<input id="a-name" autocomplete="name" placeholder="Priya Sharma" value="${esc(s.user?.displayName ?? '')}"/></label>` : ''}
-      <label>${m === 'signup' ? 'Work email' : 'Email'}<input id="a-email" type="email" autocomplete="email" placeholder="you@company.com"/></label>
-      ${
-        m !== 'reset'
-          ? `<label class="pw">Password${m === 'signin' ? '<button type="button" class="link small" data-a="auth-mode" data-v="reset">Forgot password?</button>' : ''}
-              <span class="pw-wrap"><input id="a-pw" type="${s.showPw ? 'text' : 'password'}" autocomplete="${m === 'signup' ? 'new-password' : 'current-password'}" placeholder="${m === 'signup' ? 'At least 6 characters' : '••••••••'}"/>
-              <button type="button" class="ghost sm" data-a="toggle-pw">${s.showPw ? 'Hide' : 'Show'}</button></span></label>`
-          : ''
-      }
-      <button class="primary block big" type="submit" ${s.busy ? 'disabled' : ''}>${m === 'signup' ? 'Create account' : m === 'reset' ? 'Send reset link' : 'Sign in'}</button>
-      ${
-        m === 'reset'
-          ? '<button type="button" class="link center" data-a="auth-mode" data-v="signin">← Back to sign in</button>'
-          : guest
-            ? '<button type="button" class="link center" data-a="close-auth">Not now, keep using MeetSnap as a guest</button>'
-            : '<div class="or"><span>or</span></div><button type="button" class="block" data-a="guest">Try it without an account →</button>'
-      }
-      ${s.online ? '' : '<p class="warn small">📴 You are offline. Connect once to sign in; after that MeetSnap works offline.</p>'}
-    </form>
-  </section>`;
+  <div class="auth-layout">
+    <aside class="auth-aside">
+      <div class="brand"><img src="/favicon.svg" alt=""/>MeetSnap</div>
+      <div>
+        <h1>From handshake to follow-up in a minute.</h1>
+        <p class="lede">Capture every conversation at the booth, qualify it with AI, and send a personal follow-up before the lead goes cold.</p>
+        <ul class="points">
+          ${point('scan', 'Scan cards and badges', 'Contact details are read on-device, even on bad venue Wi-Fi.')}
+          ${point('flame', 'Instant lead scoring', 'A 20-second voice note becomes a hot, warm or cold lead with a reason.')}
+          ${point('mail', 'Follow-ups written for you', 'Company research and a tailored email, ready to send.')}
+          ${point('chart', 'Live team dashboard', 'Managers see every lead and the speed to follow-up in real time.')}
+        </ul>
+      </div>
+      <p class="auth-foot">Hybrid AI with Firebase AI Logic · Gemini Nano on-device, Gemini in the cloud</p>
+    </aside>
+    <main class="auth-main">
+      <div class="auth-card">
+        ${m !== 'reset' ? `<div class="seg">${tab('signin', 'Sign in')}${tab('signup', 'Create account')}</div>` : ''}
+        <h2>${title}</h2>
+        <p class="card-sub">${sub}</p>
+        <form data-a="auth-form" novalidate>
+          ${s.authInfo ? `<div class="alert success">${icon('checkCircle', 16)}<div>${esc(s.authInfo)}</div></div>` : ''}
+          ${s.error ? `<div class="alert error">${icon('alert', 16)}<div>${esc(s.error)}</div></div>` : ''}
+          ${m === 'signup' ? `<label class="field"><span class="field-label">Full name</span><input id="a-name" autocomplete="name" placeholder="Priya Sharma" value="${esc(s.user?.displayName ?? '')}"/></label>` : ''}
+          <label class="field"><span class="field-label">${m === 'signup' ? 'Work email' : 'Email'}</span><input id="a-email" type="email" autocomplete="email" placeholder="you@company.com"/></label>
+          ${
+            m !== 'reset'
+              ? `<div class="field">
+                  <span class="field-label"><span>Password</span>${m === 'signin' ? '<button type="button" class="link small" data-a="auth-mode" data-v="reset">Forgot password?</button>' : ''}</span>
+                  <div class="input-wrap"><input id="a-pw" type="${s.showPw ? 'text' : 'password'}" autocomplete="${m === 'signup' ? 'new-password' : 'current-password'}" placeholder="${m === 'signup' ? 'At least 6 characters' : 'Your password'}"/>
+                  <button type="button" class="btn btn-ghost icon-btn" data-a="toggle-pw" aria-label="${s.showPw ? 'Hide password' : 'Show password'}">${icon(s.showPw ? 'eyeOff' : 'eye', 16)}</button></div>
+                </div>`
+              : ''
+          }
+          <button class="btn btn-primary btn-lg btn-block" type="submit" ${busy ? 'disabled' : ''}>${busy ? `<span class="spinner"></span>${esc(s.busy)}` : m === 'signup' ? 'Create account' : m === 'reset' ? 'Send reset link' : 'Sign in'}</button>
+        </form>
+        ${
+          m === 'reset'
+            ? `<p class="auth-alt"><button type="button" class="link" data-a="auth-mode" data-v="signin">${icon('chevronLeft', 14)} Back to sign in</button></p>`
+            : upgrading
+              ? '<p class="auth-alt"><button type="button" class="link muted" data-a="close-auth">Not now, keep using MeetSnap as a guest</button></p>'
+              : `<div class="divider">or</div>
+                 <button type="button" class="btn btn-block" data-a="guest" ${busy ? 'disabled' : ''}>Continue as a guest</button>
+                 <p class="auth-alt">Guests can create an account later and keep their leads.</p>`
+        }
+        ${s.online ? '' : `<div class="alert warn mt">${icon('wifiOff', 16)}<div>You're offline. Connect once to sign in; after that MeetSnap works offline.</div></div>`}
+      </div>
+    </main>
+  </div>`;
 }
 
 function verifyBanner() {
   const u = s.user;
   if (!u || u.isAnonymous || u.emailVerified || s.verifyHidden || !u.email) return '';
-  return `<div class="verify">✉️ Verify your email: we sent a link to <b>${esc(u.email)}</b>. <button class="link" data-a="resend">Resend</button> <button class="ghost sm" data-a="hide-verify">✕</button></div>`;
+  return `<div class="alert info">${icon('mail', 16)}<div>Verify your email: we sent a link to <b>${esc(u.email)}</b>. <button class="link" data-a="resend">Resend</button></div><button class="btn btn-ghost btn-sm icon-btn" data-a="hide-verify" aria-label="Dismiss">${icon('x', 16)}</button></div>`;
 }
 
 function viewOnboarding() {
+  const join = s.obMode === 'join';
   return `
-  <section class="onboard card">
-    <img src="/favicon.svg" width="56" height="56" alt=""/>
-    <h2>Set up your team</h2>
-    <p class="muted">Start your own team (you'll get a code to invite your reps), or join your manager's team with their code.</p>
-    <label>Your name <span class="muted small">(signs your follow-up emails)</span><input id="ob-name" value="${esc(s.user?.displayName ?? '')}" placeholder="e.g. Priya Sharma" autocomplete="name"/></label>
-    <button class="primary block" data-a="ob-solo">Start capturing leads →</button>
-    <details>
-      <summary>I have a team code</summary>
-      <div class="row"><input id="ob-code" placeholder="6-letter code" maxlength="6" autocomplete="off"/><button data-a="ob-join">Join team</button></div>
-    </details>
-  </section>`;
+  <div class="main-col">
+    <header class="topbar">
+      <div class="brand" style="padding:0"><img src="/favicon.svg" alt=""/>MeetSnap</div>
+      <div class="top-actions">${accountMenu()}</div>
+    </header>
+    <div class="onboard-wrap">
+      <div class="card onboard">
+        <div class="card-body">
+          <h2>Set up your workspace</h2>
+          <p class="card-sub">Start a new team as its manager, or join your manager's team with their invite code.</p>
+          ${s.error ? `<div class="alert error mt">${icon('alert', 16)}<div>${esc(s.error)}</div></div>` : ''}
+          <div class="choice">
+            <button class="${join ? '' : 'on'}" data-a="ob-mode" data-v="create">${icon('plus', 18)}<b>Create a team</b><span>You'll get a code to invite your reps.</span></button>
+            <button class="${join ? 'on' : ''}" data-a="ob-mode" data-v="join">${icon('users', 18)}<b>Join a team</b><span>Use the 6-letter code from your manager.</span></button>
+          </div>
+          <label class="field"><span class="field-label">Your name</span><input id="ob-name" value="${esc(s.user?.displayName ?? '')}" placeholder="Priya Sharma" autocomplete="name"/><span class="hint">Used to sign your follow-up emails.</span></label>
+          ${join ? '<label class="field"><span class="field-label">Team code</span><input id="ob-code" class="mono" placeholder="ABC123" maxlength="6" autocomplete="off" style="text-transform:uppercase;letter-spacing:.15em"/></label>' : ''}
+          <button class="btn btn-primary btn-lg btn-block mt" data-a="${join ? 'ob-join' : 'ob-solo'}" ${s.busy ? 'disabled' : ''}>${join ? 'Join team' : 'Create team and start'} ${icon('arrowRight', 16)}</button>
+          ${s.user?.isAnonymous ? `<p class="auth-alt">Have an account? <button class="link" data-a="signin-open">Sign in</button></p>` : ''}
+        </div>
+      </div>
+    </div>
+  </div>`;
 }
 
 const FIELDS: [keyof Contact, string, string][] = [
   ['name', 'Name', 'Ravi Kumar'],
-  ['title', 'Title', 'Head of Procurement'],
+  ['title', 'Job title', 'Head of Procurement'],
   ['company', 'Company', 'Acme Industries'],
   ['email', 'Email', 'ravi@acme.com'],
-  ['phone', 'Phone', '+91 98…'],
+  ['phone', 'Phone', '+91 98200 00000'],
   ['website', 'Website', 'acme.com'],
 ];
 const NOTE_CHIPS = ['Wants a demo', 'Has budget', 'Decision maker', 'Needs it this quarter', 'Just browsing'];
@@ -567,47 +679,50 @@ const NOTE_CHIPS = ['Wants a demo', 'Has budget', 'Decision maker', 'Needs it th
 function viewCapture() {
   const d = dictation();
   const hasContact = !!(s.contact.name || s.contact.company);
+  const hasNote = !!s.transcript.trim();
   return `
-  <section class="split">
+  <section class="capture">
     <div class="card">
-      <div class="row between"><h3>1 · Snap the card or badge</h3>${badge(s.cardSource, s.cardMs)}</div>
-      <div class="cambox"><div id="cam-slot"></div>${s.cardThumb ? `<img class="card-thumb" src="${s.cardThumb}" alt="card"/>` : ''}</div>
-      <div class="row">
-        <button class="primary" data-a="snap" ${s.busy ? 'disabled' : ''}>📇 Snap card</button>
-        <label class="btn">⬆ Upload<input type="file" accept="image/*" data-a="upload" hidden/></label>
-      </div>
-      <div class="form">
-        ${FIELDS.map(([k, label, ph]) => `<label>${label}<input data-f="${k}" value="${esc(s.contact[k])}" placeholder="${ph}" autocomplete="off"/></label>`).join('')}
+      <div class="card-head"><h3><span class="step ${hasContact ? 'done' : ''}">${hasContact ? icon('check', 12) : '1'}</span>Contact</h3>${badge(s.cardSource, s.cardMs)}</div>
+      <div class="card-body">
+        <div class="viewfinder">
+          <div id="cam-slot"></div>
+          <div class="vf-guide"></div>
+          <div class="vf-hint">Fit the business card or badge inside the frame</div>
+          ${s.cardThumb ? `<img class="vf-thumb" src="${s.cardThumb}" alt="Scanned card"/>` : ''}
+        </div>
+        <div class="cam-actions">
+          <button class="btn btn-primary" data-a="snap" ${s.busy ? 'disabled' : ''}>${icon('camera', 16)} Scan card</button>
+          <label class="btn">${icon('upload', 16)} Upload photo<input type="file" accept="image/*" data-a="upload" hidden/></label>
+        </div>
+        <div class="grid-2">
+          ${FIELDS.map(([k, label, ph]) => `<label class="field"><span class="field-label">${label}</span><input data-f="${k}" value="${esc(s.contact[k])}" placeholder="${ph}" autocomplete="off"/></label>`).join('')}
+        </div>
       </div>
     </div>
     <div class="card">
-      <h3>2 · What did they say?</h3>
-      <p class="muted small">Speak for 20 seconds: their need, budget, timeline and what you agreed. ${dictationSupported ? '' : 'Voice is not supported in this browser, so type it.'}</p>
-      ${
-        dictationSupported
-          ? `<button class="mic ${d.listening ? 'on' : ''}" data-a="mic">${d.listening ? '⏹ Stop' : '🎙 Talk'}</button>
-             <span class="muted small" id="mic-state">${d.listening ? (d.onDevice ? 'Listening · on-device' : 'Listening…') : ''}</span>`
-          : ''
-      }
-      <textarea id="note" rows="6" placeholder="e.g. Ravi runs procurement for 3 plants, needs 500 safety helmets by March, budget approved, wants a quote by Friday.">${esc(s.transcript)}</textarea>
-      <div class="interim muted small" id="interim">${esc(d.interim)}</div>
-      ${d.error ? `<p class="warn small">${esc(d.error)}</p>` : ''}
-      <div class="chips">${NOTE_CHIPS.map((c) => `<button class="chip" data-a="note-chip" data-v="${esc(c)}">+ ${esc(c)}</button>`).join('')}</div>
-      <button class="primary block big" data-a="save" ${s.busy || !hasContact ? 'disabled' : ''}>✅ Save lead</button>
-      <p class="muted small center">The lead is scored on-device. Company research and the follow-up email are written in the cloud${s.online ? '' : ' when you are back online'}.</p>
-      ${hasContact || s.transcript ? '<button class="link center" data-a="clear">Clear and start over</button>' : ''}
+      <div class="card-head"><h3><span class="step ${hasNote ? 'done' : ''}">${hasNote ? icon('check', 12) : '2'}</span>Conversation notes</h3></div>
+      <div class="card-body">
+        ${
+          dictationSupported
+            ? `<div class="recorder">
+                <button class="rec-btn ${d.listening ? 'on' : ''}" data-a="mic" aria-label="${d.listening ? 'Stop recording' : 'Record a voice note'}">${icon(d.listening ? 'stop' : 'mic', 18)}</button>
+                <div id="mic-state"><b>${d.listening ? 'Listening…' : 'Record a voice note'}</b><span>${d.listening ? (d.onDevice ? 'Transcribed on this device. Tap to stop.' : 'Tap to stop when you are done.') : 'About 20 seconds: their need, budget, timeline and the next step.'}</span></div>
+              </div>`
+            : `<div class="alert info">${icon('info', 16)}<div>Voice notes aren't supported in this browser. Type the notes instead.</div></div>`
+        }
+        <label class="field"><span class="field-label">Notes</span><textarea id="note" rows="7" placeholder="e.g. Ravi runs procurement for 3 plants. Needs 500 safety helmets by March, budget approved, wants a quote by Friday.">${esc(s.transcript)}</textarea></label>
+        <div class="interim" id="interim">${esc(d.interim)}</div>
+        ${d.error ? `<div class="alert warn">${icon('alert', 16)}<div>${esc(d.error)}</div></div>` : ''}
+        <div class="field-label" style="margin-top:10px">Quick add</div>
+        <div class="chips">${NOTE_CHIPS.map((c) => `<button class="chip" data-a="note-chip" data-v="${esc(c)}">${icon('plus', 12)}${esc(c)}</button>`).join('')}</div>
+      </div>
+      <div class="card-foot">
+        <button class="btn btn-primary btn-lg btn-block" data-a="save" ${s.busy || !hasContact ? 'disabled' : ''}>${icon('check', 16)} Save lead</button>
+        <p class="save-note">Scored on-device. Research and the follow-up email are written in the cloud${s.online ? '' : ' when you reconnect'}.${hasContact || s.transcript ? ' <button class="link muted small" data-a="clear">Clear form</button>' : ''}</p>
+      </div>
     </div>
   </section>`;
-}
-
-function leadStatus(l: Lead) {
-  if (l.status === 'won') return '<span class="st won">🏆 Won</span>';
-  if (l.status === 'lost') return '<span class="st lost">Lost</span>';
-  if (l.followedUpAt) return '<span class="st done">✓ Followed up</span>';
-  if (l.email) return '<span class="st ready">✉️ Ready to send</span>';
-  if (l.cloudStatus === 'error') return '<span class="st err">⚠ Needs retry</span>';
-  if (!s.online && l.ownerUid === uid()) return '<span class="st wait">📴 Waiting for signal</span>';
-  return '<span class="st wait">⏳ Writing…</span>';
 }
 
 function viewLeads() {
@@ -622,102 +737,144 @@ function viewLeads() {
   });
 }
 
+const webUrl = (w: string) => (/^https?:\/\//i.test(w) ? w : `https://${w}`);
+
 function viewLead(l: Lead) {
   const c = l.contact;
-  const mailto = l.email && c.email ? `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(l.email.subject)}&body=${encodeURIComponent(l.email.body)}` : '';
+  const mail = mailtoFor(l);
+  const name = c.name || c.company || 'Unknown';
+  const facts: [string, string][] = [
+    ['Needs', l.note.needs.join(', ')],
+    ['Budget', l.note.budget],
+    ['Timeline', l.note.timeline],
+    ['Decision role', l.note.authority],
+    ['Next step', l.note.nextStep],
+    ['Interested in', l.note.products.join(', ')],
+    ['Captured by', `${l.ownerName} · ${new Date(l.createdAt).toLocaleString()}${l.event ? ` · ${l.event}` : ''}`],
+  ];
   return `
-  <section class="split">
-    <div class="card">
-      <button class="link" data-a="back">← All leads</button>
-      <div class="row">
-        ${l.cardThumb ? `<img class="thumb" src="${l.cardThumb}" alt=""/>` : ''}
-        <div><h2>${esc(c.name || c.company || 'Unknown')}</h2><p class="muted">${esc([c.title, c.company].filter(Boolean).join(' · '))}</p></div>
+  <button class="back" data-a="back">${icon('chevronLeft', 16)} All leads</button>
+  <div class="grid grid-cols-2" style="align-items:start">
+    <div class="grid">
+      <div class="card">
+        <div class="card-body">
+          <div class="person">
+            ${l.cardThumb ? `<img class="person-thumb" src="${l.cardThumb}" alt="Business card"/>` : `<span class="person-initials">${esc(initials(name))}</span>`}
+            <div style="min-width:0"><h2>${esc(name)}</h2><p class="muted">${esc([c.title, c.company].filter(Boolean).join(' · ') || 'No title or company')}</p></div>
+          </div>
+          <div class="row wrap mt">${scoreBadge(l.score)}${statusBadge(l, s.online, uid())}${badge(l.sources.note)}</div>
+          <div class="reason">${icon('info', 16)}<div>${esc(l.scoreReason)}</div></div>
+          <div class="contact-actions">
+            ${c.email ? `<a class="btn btn-sm" href="mailto:${esc(c.email)}">${icon('mail', 14)} ${esc(c.email)}</a>` : ''}
+            ${c.phone ? `<a class="btn btn-sm" href="tel:${esc(c.phone)}">${icon('phone', 14)} ${esc(c.phone)}</a>` : ''}
+            ${c.website ? `<a class="btn btn-sm" href="${esc(webUrl(c.website))}" target="_blank" rel="noopener">${icon('globe', 14)} ${esc(c.website)}</a>` : ''}
+          </div>
+        </div>
+        <div class="card-head" style="border-top:1px solid var(--border)"><h3>Qualification</h3></div>
+        <div class="card-body">
+          <dl class="dl">${facts.filter(([, v]) => v.trim()).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+          ${l.note.transcript ? `<details class="mt"><summary class="link small">Show the original note</summary><p class="muted small mt">${esc(l.note.transcript)}</p></details>` : ''}
+        </div>
+        <div class="card-foot row">
+          <span class="muted small" style="margin-right:auto">Outcome</span>
+          <button class="btn btn-sm" data-a="won" data-id="${l.id}" ${l.status === 'won' ? 'disabled' : ''}>${icon('trophy', 14)} Won</button>
+          <button class="btn btn-sm" data-a="lost" data-id="${l.id}" ${l.status === 'lost' ? 'disabled' : ''}>Lost</button>
+        </div>
       </div>
-      <div class="row wrap">${scoreChip(l.score)}${leadStatus(l)}${badge(l.sources.note)}</div>
-      <p class="reason">${esc(l.scoreReason)}</p>
-      <dl>
-        ${c.email ? `<dt>Email</dt><dd><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></dd>` : ''}
-        ${c.phone ? `<dt>Phone</dt><dd><a href="tel:${esc(c.phone)}">${esc(c.phone)}</a></dd>` : ''}
-        ${c.website ? `<dt>Website</dt><dd>${esc(c.website)}</dd>` : ''}
-        ${l.note.needs.length ? `<dt>Needs</dt><dd>${l.note.needs.map(esc).join(', ')}</dd>` : ''}
-        ${l.note.budget ? `<dt>Budget</dt><dd>${esc(l.note.budget)}</dd>` : ''}
-        ${l.note.timeline ? `<dt>Timeline</dt><dd>${esc(l.note.timeline)}</dd>` : ''}
-        ${l.note.authority ? `<dt>Authority</dt><dd>${esc(l.note.authority)}</dd>` : ''}
-        ${l.note.nextStep ? `<dt>Next step</dt><dd>${esc(l.note.nextStep)}</dd>` : ''}
-        <dt>Captured</dt><dd>${esc(l.ownerName)} · ${new Date(l.createdAt).toLocaleString()}${l.event ? ` · ${esc(l.event)}` : ''}</dd>
-      </dl>
-      ${l.note.transcript ? `<details><summary>Original note</summary><p>${esc(l.note.transcript)}</p></details>` : ''}
       ${
         l.research
-          ? `<div class="research"><div class="row between"><b>🔎 ${esc(c.company)}</b>${badge(l.sources.research)}</div>
-             <p>${esc(l.research.about)}</p><p class="muted small">${esc(l.research.industry)} · ${esc(l.research.sizeGuess)}</p>
-             ${l.research.talkingPoints.length ? `<ul>${l.research.talkingPoints.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
-             <p class="muted tiny">AI summary from model knowledge — verify before relying on it.</p></div>`
+          ? `<div class="card research">
+              <div class="card-head"><h3>${icon('building', 16)} ${esc(c.company || 'Company')}</h3>${badge(l.sources.research)}</div>
+              <div class="card-body">
+                <p>${esc(l.research.about)}</p>
+                <p class="muted small">${esc([l.research.industry, l.research.sizeGuess].filter(Boolean).join(' · '))}</p>
+                ${l.research.talkingPoints.length ? `<ul>${l.research.talkingPoints.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+                <p class="disclaimer">${icon('info', 13)} AI summary from model knowledge. Verify before relying on it.</p>
+              </div>
+            </div>`
           : ''
       }
-      <div class="row wrap">
-        <button data-a="won" data-id="${l.id}" ${l.status === 'won' ? 'disabled' : ''}>🏆 Won</button>
-        <button data-a="lost" data-id="${l.id}" ${l.status === 'lost' ? 'disabled' : ''}>Lost</button>
-      </div>
     </div>
-    <div class="card">
-      <div class="row between"><h3>✉️ Follow-up email</h3>${badge(l.sources.email)}</div>
+    <div class="card email-box">
+      <div class="card-head"><h3>${icon('mail', 16)} Follow-up email</h3>${badge(l.sources.email)}</div>
       ${
         l.email
-          ? `<label>Subject<input id="em-subject" value="${esc(l.email.subject)}"/></label>
-             <label>Message<textarea id="em-body" rows="12">${esc(l.email.body)}</textarea></label>
-             <div class="row wrap">
-               ${mailto ? `<a class="btn primary" href="${mailto}" data-a="sent" data-id="${l.id}">📤 Open in email</a>` : '<span class="muted small">No email address on this lead: copy the text instead.</span>'}
-               <button data-a="copy" data-id="${l.id}">📋 Copy</button>
-               <button data-a="regen" data-id="${l.id}" ${s.online ? '' : 'disabled'}>↻ Rewrite</button>
-               ${l.followedUpAt ? '' : `<button class="ghost" data-a="mark-sent" data-id="${l.id}">Mark as sent</button>`}
+          ? `<div class="card-body">
+               <label class="field"><span class="field-label">Subject</span><input id="em-subject" value="${esc(l.email.subject)}"/></label>
+               <label class="field"><span class="field-label">Message</span><textarea id="em-body" rows="12">${esc(l.email.body)}</textarea></label>
+               ${l.followedUpAt ? `<p class="followed mt">${icon('checkCircle', 16)} Followed up ${Math.max(0, Math.round((l.followedUpAt - l.createdAt) / 60000))} min after the meeting</p>` : ''}
              </div>
-             ${l.followedUpAt ? `<p class="ok small">✓ Followed up ${Math.max(0, Math.round((l.followedUpAt - l.createdAt) / 60000))} min after meeting.</p>` : ''}`
-          : l.cloudStatus === 'error'
-            ? `<p class="warn">Couldn't write the email (the cloud was busy).</p><button class="primary" data-a="retry" data-id="${l.id}" ${s.online ? '' : 'disabled'}>Retry</button>`
-            : l.ownerUid !== uid()
-              ? `<p class="muted">⏳ ${esc(l.ownerName)}'s phone is writing this follow-up${s.online ? '' : ''}.</p>`
-              : `<p class="muted">${s.online ? '⏳ Researching the company and writing the email…' : '📴 Saved offline. The email will be written as soon as you reconnect.'}</p>`
+             <div class="card-foot email-actions">
+               ${mail ? `<a class="btn btn-primary" href="${mail}" data-a="sent" data-id="${l.id}">${icon('send', 16)} Open in email</a>` : '<span class="muted small" style="align-self:center">No email address on this lead. Copy the text instead.</span>'}
+               <button class="btn" data-a="copy" data-id="${l.id}">${icon('copy', 16)} Copy</button>
+               <button class="btn" data-a="regen" data-id="${l.id}" ${s.online ? '' : 'disabled'}>${icon('refresh', 16)} Rewrite</button>
+               ${l.followedUpAt ? '' : `<button class="btn btn-ghost" data-a="mark-sent" data-id="${l.id}">Mark as sent</button>`}
+             </div>`
+          : `<div class="card-body">${
+              l.cloudStatus === 'error'
+                ? `<div class="alert error">${icon('alert', 16)}<div>The email couldn't be written because the cloud model was busy.</div></div><button class="btn btn-primary mt" data-a="retry" data-id="${l.id}" ${s.online ? '' : 'disabled'}>${icon('refresh', 16)} Try again</button>`
+                : l.ownerUid !== uid()
+                  ? `<div class="pending"><span class="spinner"></span>${esc(l.ownerName)}'s device is writing this follow-up.</div>`
+                  : s.online
+                    ? '<div class="pending"><span class="spinner"></span>Researching the company and writing the email…</div>'
+                    : `<div class="pending">${icon('wifiOff', 18)}Saved offline. The email is written as soon as you reconnect.</div>`
+            }</div>`
       }
     </div>
-  </section>`;
+  </div>`;
 }
 
 function viewTeam() {
   const t = s.team;
-  if (!t) return '<section class="card"><p class="muted">Loading team…</p></section>';
+  if (!t) return '<div class="card card-body"><div class="pending"><span class="spinner"></span>Loading your team…</div></div>';
+  const u = s.user;
+  const guest = !!u?.isAnonymous;
+  const name = s.profile?.name || u?.displayName || 'You';
   return `
-  <section class="split">
+  <div class="grid grid-cols-2" style="align-items:start">
     <div class="card">
-      <h3>Your team</h3>
-      <label>Team name<input id="t-name" value="${esc(t.name)}"/></label>
-      <label>Your company<input id="t-company" value="${esc(t.sellerCompany)}" placeholder="e.g. SafeGear Industrial Supplies"/></label>
-      <label>What you sell <span class="muted small">(used to score leads and write emails)</span>
-        <textarea id="t-offering" rows="3" placeholder="e.g. Industrial safety equipment: helmets, gloves and harnesses for factories, with next-day delivery.">${esc(t.offering)}</textarea></label>
-      <label>Current event<input id="t-event" value="${esc(t.event)}" placeholder="e.g. IndiaSafe Expo 2026, Mumbai"/></label>
-      <button class="primary" data-a="save-team">Save</button>
+      <div class="card-head"><div><h3>Workspace</h3><p class="card-sub">Used to score leads and write follow-up emails.</p></div></div>
+      <div class="card-body">
+        <label class="field"><span class="field-label">Team name</span><input id="t-name" value="${esc(t.name)}"/></label>
+        <label class="field"><span class="field-label">Your company</span><input id="t-company" value="${esc(t.sellerCompany)}" placeholder="SafeGear Industrial Supplies"/></label>
+        <label class="field"><span class="field-label">What you sell</span><textarea id="t-offering" rows="3" placeholder="Industrial safety equipment: helmets, gloves and harnesses for factories, with next-day delivery.">${esc(t.offering)}</textarea><span class="hint">One or two sentences. The AI uses this to judge fit and to write emails.</span></label>
+        <label class="field"><span class="field-label">Current event</span><input id="t-event" value="${esc(t.event)}" placeholder="IndiaSafe Expo 2026, Mumbai"/></label>
+      </div>
+      <div class="card-foot row" style="justify-content:flex-end"><button class="btn btn-primary" data-a="save-team">Save changes</button></div>
     </div>
-    <div class="card">
-      <h3>Invite your reps</h3>
-      <p class="muted">Reps install MeetSnap on their phone and enter this code. Their leads appear on your Leads dashboard live.</p>
-      <div class="code">${esc(t.joinCode)}</div>
-      <button data-a="copy-code">📋 Copy code</button>
-      <hr/>
-      <h3>Your account</h3>
-      ${
-        s.user?.isAnonymous
-          ? `<div class="info">You're using MeetSnap as a guest. Create an account to keep your leads and sign in on other devices.</div>
-             <button class="primary" data-a="upgrade">Create account</button>`
-          : `<p>${esc(s.user?.email ?? '')} ${s.user?.emailVerified ? '<span class="ok small">✓ verified</span>' : '<span class="warn small">not verified</span> <button class="link small" data-a="resend">Resend link</button>'}</p>`
-      }
-      <label>Your name (signs your emails)<input id="p-name" value="${esc(s.profile?.name ?? '')}"/></label>
-      <div class="row"><button data-a="save-name">Save name</button><button class="ghost" data-a="logout">Sign out</button></div>
-      <details><summary>Join a different team</summary>
-        <div class="row"><input id="j-code" placeholder="6-letter code" maxlength="6"/><button data-a="join">Join</button></div>
-        <p class="muted small">Your past leads stay with your current team.</p>
-      </details>
+    <div class="grid">
+      <div class="card">
+        <div class="card-head"><div><h3>Invite your team</h3><p class="card-sub">Reps enter this code in the app. Their leads appear on your dashboard live.</p></div></div>
+        <div class="card-body">
+          <div class="code-box"><span class="code">${esc(t.joinCode)}</span><button class="btn btn-sm" data-a="copy-code">${icon('copy', 14)} Copy</button></div>
+          <details class="mt"><summary class="link small">Join a different team instead</summary>
+            <div class="row mt"><input id="j-code" class="mono" placeholder="ABC123" maxlength="6" style="text-transform:uppercase"/><button class="btn" data-a="join">Join</button></div>
+            <p class="hint">Your past leads stay with your current team.</p>
+          </details>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Account</h3></div>
+        <div class="card-body">
+          <div class="acct-row">
+            <span class="avatar ${guest ? 'guest' : ''}">${guest ? icon('user', 18) : esc(initials(name))}</span>
+            <div style="min-width:0"><b>${esc(name)}</b><div class="muted small">${
+              guest
+                ? 'Guest session'
+                : `${esc(u?.email ?? '')} · ${u?.emailVerified ? '<span style="color:var(--success)">verified</span>' : '<span style="color:var(--warning)">not verified</span> · <button class="link small" data-a="resend">Resend link</button>'}`
+            }</div></div>
+          </div>
+          ${guest ? `<div class="alert info mt">${icon('info', 16)}<div>You're using MeetSnap as a guest. Create an account to keep your leads and sign in on other devices.</div></div>` : ''}
+          <label class="field mt"><span class="field-label">Display name</span><input id="p-name" value="${esc(s.profile?.name ?? '')}"/><span class="hint">Signs your follow-up emails.</span></label>
+        </div>
+        <div class="card-foot row">
+          ${guest ? `<button class="btn btn-primary" data-a="upgrade">Create account</button>` : ''}
+          <button class="btn" data-a="save-name">Save name</button>
+          <button class="btn btn-ghost btn-danger" data-a="logout" style="margin-left:auto">${icon('logout', 16)} ${guest ? 'End session' : 'Sign out'}</button>
+        </div>
+      </div>
     </div>
-  </section>`;
+  </div>`;
 }
 
 function logDrawer() {
@@ -735,37 +892,49 @@ function logDrawer() {
   const rows = [...s.log]
     .reverse()
     .map(
-      (l) => `<tr><td>${new Date(l.at).toLocaleTimeString()}</td><td>${esc(l.task)}</td><td>${l.source === 'error' ? '<span class="src err">error</span>' : badge(l.source)}</td><td>${l.ms} ms</td><td class="muted">${l.offline ? '📴 ' : ''}${esc(l.note ?? '')}</td></tr>`,
+      (l) => `<tr><td>${new Date(l.at).toLocaleTimeString()}</td><td>${esc(l.task)}</td><td>${l.source === 'error' ? '<span class="badge err">Error</span>' : badge(l.source)}</td><td>${l.ms} ms</td><td class="muted small">${l.offline ? 'offline · ' : ''}${esc((l.note ?? '').slice(0, 80))}</td></tr>`,
     )
     .join('');
-  return `<aside class="drawer">
-    <div class="row between"><h3>Hybrid AI activity</h3><button class="ghost" data-a="log">Close</button></div>
-    <p class="muted small">Card reading and lead scoring prefer Gemini Nano on this device: private, free and offline. Research and emails prefer cloud Gemini.</p>
-    ${
-      s.log.length
-        ? `<div class="stats small4">
-            <div><b>${ok.length ? Math.round((dev.length / ok.length) * 100) : 0}%</b><span>on-device (${dev.length} of ${ok.length})</span></div>
-            <div><b>${med(dev.map((l) => l.ms))}</b><span>median ⚡ on-device</span></div>
-            <div><b>${med(cloud.map((l) => l.ms))}</b><span>median ☁️ cloud</span></div>
-            <div><b>${off.filter((l) => l.source !== 'error').length}/${off.length}</b><span>offline calls answered</span></div>
-          </div><button class="ghost small" data-a="clear-log">Reset stats</button>`
-        : ''
-    }
-    <table><thead><tr><th>Time</th><th>Task</th><th>Where</th><th>Latency</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="muted">No AI calls yet.</td></tr>'}</tbody></table>
+  return `<div class="drawer-scrim" data-a="log"></div>
+  <aside class="drawer" aria-label="Hybrid AI activity">
+    <div class="drawer-head"><div><h3>Hybrid AI activity</h3><p class="card-sub">Where each AI request ran, and how fast.</p></div><button class="btn btn-ghost icon-btn" data-a="log" aria-label="Close">${icon('x', 18)}</button></div>
+    <div class="drawer-body">
+      <p class="muted small">Card reading and lead scoring prefer Gemini Nano on this device: private, free and offline. Company research and emails prefer cloud Gemini.</p>
+      ${
+        s.log.length
+          ? `<div class="mini-stats">
+              <div><b>${ok.length ? Math.round((dev.length / ok.length) * 100) : 0}%</b><span>on-device (${dev.length} of ${ok.length})</span></div>
+              <div><b>${off.filter((l) => l.source !== 'error').length}/${off.length}</b><span>offline requests answered</span></div>
+              <div><b>${med(dev.map((l) => l.ms))}</b><span>median on-device latency</span></div>
+              <div><b>${med(cloud.map((l) => l.ms))}</b><span>median cloud latency</span></div>
+            </div>
+            <div class="row between"><span class="field-label" style="margin:0">Recent requests</span><button class="btn btn-ghost btn-sm" data-a="clear-log">Reset</button></div>`
+          : ''
+      }
+      <div class="card table-wrap" style="margin-top:8px"><table class="table"><thead><tr><th>Time</th><th>Task</th><th>Where</th><th>Latency</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="muted center">No AI requests yet.</td></tr>'}</tbody></table></div>
+    </div>
   </aside>`;
 }
 
+function onAuthScreen() {
+  return !s.user || s.authOpen || (s.user.isAnonymous && !s.profile && !s.guestChosen);
+}
+
 function render() {
-  let body: string;
+  let page: string;
   if (configMissing)
-    body = `<section class="card"><h2>Firebase is not configured</h2><p>Copy <code>.env.example</code> to <code>.env.local</code>, fill in your Firebase web config, and restart <code>npm run dev</code>.</p></section>`;
-  else if (!s.authReady || (s.user && !s.profileLoaded)) body = '<section class="loading"><div class="spinner"></div></section>';
-  else if (!s.user || s.authOpen) body = viewAuth();
-  else if (!s.profile) body = viewOnboarding();
-  else if (s.leadId) {
-    const l = s.leads.find((x) => x.id === s.leadId);
-    body = l ? viewLead(l) : '<section class="card"><p class="muted">Lead not found.</p></section>';
-  } else body = { capture: viewCapture, leads: viewLeads, team: viewTeam }[s.tab]();
+    page = `<div class="onboard-wrap"><div class="card onboard"><div class="card-body"><h2>Firebase is not configured</h2><p class="card-sub">Copy <code>.env.example</code> to <code>.env.local</code>, fill in your Firebase web config, and restart <code>npm run dev</code>.</p></div></div></div>`;
+  else if (!s.authReady || (s.user && !s.profileLoaded)) page = '<div class="loading"><span class="spinner lg"></span></div>';
+  else if (onAuthScreen()) page = viewAuth();
+  else if (!s.profile) page = viewOnboarding();
+  else {
+    let body: string;
+    if (s.leadId) {
+      const l = s.leads.find((x) => x.id === s.leadId);
+      body = l ? viewLead(l) : '<div class="card empty"><h2>Lead not found</h2><p>It may have been removed.</p><button class="btn" data-a="back">Back to leads</button></div>';
+    } else body = { capture: viewCapture, leads: viewLeads, team: viewTeam }[s.tab]();
+    page = shell(body);
+  }
 
   // Keep focus and caret in text fields across re-renders (dictation and live updates re-render often).
   const active = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
@@ -773,16 +942,9 @@ function render() {
   const caret = active && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
 
   root.innerHTML = `
-    ${header()}
-    ${s.online ? '' : `<div class="banner">📴 Offline: ${s.nano === 'available' ? 'cards and notes are read on-device by Gemini Nano' : 'type the details; leads are saved on this device'}. Emails are written when you reconnect.</div>`}
-    ${s.authOpen ? '' : tabs()}
-    <main>
-      ${s.error && s.user && !s.authOpen ? `<div class="error">${esc(s.error)} <button class="ghost" data-a="dismiss">✕</button></div>` : ''}
-      ${s.profile ? verifyBanner() : ''}
-      ${body}
-    </main>
-    ${s.busy ? `<div class="busy"><div class="spinner"></div>${esc(s.busy)}</div>` : ''}
-    ${s.toast ? `<div class="toast">${esc(s.toast)}</div>` : ''}
+    ${page}
+    ${s.busy && !onAuthScreen() ? `<div class="busy"><div class="busy-card"><span class="spinner"></span>${esc(s.busy)}</div></div>` : ''}
+    ${s.toast ? `<div class="toast" role="status">${icon('checkCircle', 16)}${esc(s.toast)}</div>` : ''}
     ${logDrawer()}`;
   const slot = root.querySelector('#cam-slot');
   if (slot) slot.appendChild(video);
@@ -802,8 +964,14 @@ const val = (id: string) => (root.querySelector<HTMLInputElement | HTMLTextAreaE
 const leadById = (id?: string) => s.leads.find((l) => l.id === id);
 
 root.addEventListener('click', async (ev) => {
+  // Clicking anywhere outside the account menu closes it.
+  if (s.menuOpen && !(ev.target as HTMLElement).closest('.acct')) {
+    s.menuOpen = false;
+    if (!(ev.target as HTMLElement).closest('[data-a]')) return render();
+  }
   const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-a]');
   if (!el || el.tagName === 'INPUT') return;
+  if (el.closest('.menu')) s.menuOpen = false;
   const a = el.dataset.a;
   const id = el.dataset.id;
   const v = el.dataset.v;
@@ -816,7 +984,16 @@ root.addEventListener('click', async (ev) => {
     case 'toggle-pw':
       return set({ showPw: !s.showPw });
     case 'guest':
+      s.guestChosen = true;
+      // A guest session may already exist on this device: reuse it instead of creating another.
+      if (s.user?.isAnonymous) return set({ error: null });
       return authGuard('Starting…', () => continueAsGuest());
+    case 'signin-open':
+      return set({ authOpen: true, authMode: 'signin', error: null, authInfo: null });
+    case 'menu':
+      return set({ menuOpen: !s.menuOpen });
+    case 'ob-mode':
+      return set({ obMode: v === 'join' ? 'join' : 'create', error: null });
     case 'close-auth':
       return set({ authOpen: false, error: null });
     case 'upgrade':
